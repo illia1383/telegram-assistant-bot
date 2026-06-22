@@ -30,6 +30,26 @@ async function sendMorningDigest() {
   }
 }
 
+// ─── Scheduled job: Nightly logging reminder ─────────────────────────────────
+
+async function sendNightlyReminder() {
+  console.log('[cron] Running nightly reminder job...');
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const log = await getLogForDate(today);
+
+    if (log?.completed_daily_goal_ids || log?.notes) {
+      // Already logged something today — no need to remind
+      return;
+    }
+
+    await sendMessage(`🌙 *End of day reminder*\n\nYou haven't logged anything today (${today}).\n\nWhat did you get done? Just reply and I'll log it!`);
+    console.log('[cron] Nightly reminder sent');
+  } catch (err) {
+    console.error('[cron] Nightly reminder failed:', err.message);
+  }
+}
+
 // ─── Scheduled job: Evening check-in prompt ──────────────────────────────────
 
 async function sendEveningCheckin() {
@@ -88,6 +108,10 @@ async function start() {
 
   cron.schedule(eveningTime, sendEveningCheckin, { timezone });
   console.log(`[server] Evening check-in scheduled: "${eveningTime}" (${timezone})`);
+
+  const nightlyTime = process.env.NIGHTLY_REMINDER_TIME || '50 23 * * *';
+  cron.schedule(nightlyTime, sendNightlyReminder, { timezone });
+  console.log(`[server] Nightly reminder scheduled: "${nightlyTime}" (${timezone})`);
 
   // Health check HTTP server
   const port = process.env.PORT || 3000;

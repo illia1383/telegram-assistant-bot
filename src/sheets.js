@@ -74,6 +74,30 @@ async function updateRow(tabName, sheetRowNumber, row) {
   });
 }
 
+async function deleteRow(tabName, sheetRowNumber) {
+  const client = getClient();
+  const meta = await client.spreadsheets.get({ spreadsheetId: SHEET_ID });
+  const sheet = meta.data.sheets.find(s => s.properties.title === tabName);
+  if (!sheet) throw new Error(`Tab "${tabName}" not found`);
+  const sheetId = sheet.properties.sheetId;
+
+  await client.spreadsheets.batchUpdate({
+    spreadsheetId: SHEET_ID,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: sheetRowNumber - 1, // 0-based, inclusive
+            endIndex: sheetRowNumber,        // 0-based, exclusive
+          },
+        },
+      }],
+    },
+  });
+}
+
 function rowsToObjects(rows) {
   if (!rows || rows.length < 2) return [];
   const [headers, ...data] = rows;
@@ -110,6 +134,23 @@ export async function getDailyGoals(activeOnly = true) {
   return activeOnly ? goals.filter(g => g.active === 'TRUE') : goals;
 }
 
+export async function removeDailyGoal(text) {
+  const rows = await getSheetData(TABS.DAILY_GOALS);
+  if (!rows || rows.length < 2) return false;
+
+  const headers = rows[0];
+  const dataRows = rows.slice(1);
+  const textCol = headers.indexOf('text');
+  const rowIndex = dataRows.findIndex(r => r[textCol]?.toLowerCase() === text.toLowerCase());
+  if (rowIndex === -1) return false;
+
+  const sheetRow = rowIndex + 2;
+  const existing = Object.fromEntries(headers.map((h, i) => [h, dataRows[rowIndex][i] ?? '']));
+  await updateRow(TABS.DAILY_GOALS, sheetRow, [existing.id, existing.text, existing.created_date, 'FALSE']);
+  console.log(`[sheets] Deactivated daily goal: "${text}"`);
+  return true;
+}
+
 export async function addDailyGoal(text) {
   const id = randomUUID();
   const created = todayString();
@@ -119,6 +160,25 @@ export async function addDailyGoal(text) {
 }
 
 // ─── OneoffGoals ──────────────────────────────────────────────────────────────
+
+export async function removeOneoffGoal(text) {
+  const rows = await getSheetData(TABS.ONEOFF_GOALS);
+  if (!rows || rows.length < 2) return { removed: false };
+
+  const headers = rows[0];
+  const dataRows = rows.slice(1);
+  const textCol = headers.indexOf('text');
+  const doneCol = headers.indexOf('done');
+  const rowIndex = dataRows.findIndex(r => r[textCol]?.toLowerCase() === text.toLowerCase());
+
+  if (rowIndex === -1) return { removed: false };
+  if (dataRows[rowIndex][doneCol] === 'TRUE') return { removed: false, alreadyDone: true };
+
+  const sheetRow = rowIndex + 2;
+  await deleteRow(TABS.ONEOFF_GOALS, sheetRow);
+  console.log(`[sheets] Deleted one-off goal: "${text}"`);
+  return { removed: true };
+}
 
 export async function getOneoffGoals(undoneOnly = true) {
   const rows = await getSheetData(TABS.ONEOFF_GOALS);

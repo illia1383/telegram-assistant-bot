@@ -6,6 +6,8 @@ import {
   getOneoffGoals,
   addDailyGoal,
   addOneoffGoal,
+  removeDailyGoal,
+  removeOneoffGoal,
   markOneoffDone,
   getLogForDate,
   upsertLogForDate,
@@ -89,6 +91,8 @@ Just type what you did — e.g. "did 3 leetcodes and applied to 2 jobs"
 *Goals*
 \`add daily: <text>\` — add a recurring daily goal
 \`add goal: <text>\` — add a one-off goal
+\`remove daily: <text>\` — remove a daily goal (exact name)
+\`remove goal: <text>\` — remove a one-off goal (exact name)
 
 *Check in*
 \`status\` or \`today\` — see today's goals and progress
@@ -130,6 +134,40 @@ async function handleAddGoal(text) {
   }
   const goal = await addOneoffGoal(goalText);
   await sendMessage(`Added one-off goal: "${goal.text}" 📌`);
+}
+
+// ─── Command: remove daily goal ──────────────────────────────────────────────
+
+async function handleRemoveDaily(text) {
+  const goalText = text.replace(/^remove\s+daily\s*:\s*/i, '').trim();
+  if (!goalText) {
+    await sendMessage('Usage: `remove daily: <exact goal text>`');
+    return;
+  }
+  const removed = await removeDailyGoal(goalText);
+  if (removed) {
+    await sendMessage(`Removed daily goal: "${goalText}" ✅`);
+  } else {
+    await sendMessage(`No active daily goal found with that exact name: "${goalText}"\n\nSend \`status\` to see your current goals.`);
+  }
+}
+
+// ─── Command: remove one-off goal ────────────────────────────────────────────
+
+async function handleRemoveGoal(text) {
+  const goalText = text.replace(/^remove\s+goal\s*:\s*/i, '').trim();
+  if (!goalText) {
+    await sendMessage('Usage: `remove goal: <exact goal text>`');
+    return;
+  }
+  const result = await removeOneoffGoal(goalText);
+  if (result.removed) {
+    await sendMessage(`Removed one-off goal: "${goalText}" ✅`);
+  } else if (result.alreadyDone) {
+    await sendMessage(`"${goalText}" is already marked as done — it can't be removed.`);
+  } else {
+    await sendMessage(`No pending one-off goal found with that exact name: "${goalText}"\n\nSend \`status\` to see your current goals.`);
+  }
 }
 
 // ─── Command: streak ──────────────────────────────────────────────────────────
@@ -270,6 +308,14 @@ export async function routeMessage(text) {
   }
   if (/^help\b/i.test(text)) {
     await handleHelp();
+    return;
+  }
+  if (/^remove\s+daily\s*:/i.test(text)) {
+    await handleRemoveDaily(text);
+    return;
+  }
+  if (/^remove\s+goal\s*:/i.test(text)) {
+    await handleRemoveGoal(text);
     return;
   }
   if (/^add\s+daily\s*:/i.test(text)) {
