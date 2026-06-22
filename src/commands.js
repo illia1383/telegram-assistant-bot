@@ -144,29 +144,45 @@ async function handleStreak() {
 
 async function handleStatus() {
   const today = todayString();
-  const [dailyGoals, log] = await Promise.all([
+  const [dailyGoals, oneoffGoals, log] = await Promise.all([
     getDailyGoals(true),
+    getOneoffGoals(true),
     getLogForDate(today),
   ]);
 
-  const completedIds = new Set(
+  const completedDailyIds = new Set(
     (log?.completed_daily_goal_ids || '').split(',').filter(Boolean)
   );
+  const completedOneoffIds = new Set(
+    (log?.completed_oneoff_ids || '').split(',').filter(Boolean)
+  );
 
-  if (dailyGoals.length === 0) {
-    await sendMessage('You have no active daily goals. Add one with `add daily: <goal text>`.');
+  if (dailyGoals.length === 0 && oneoffGoals.length === 0) {
+    await sendMessage('You have no active goals. Add one with `add daily: <text>` or `add goal: <text>`.');
     return;
   }
 
-  const lines = dailyGoals.map(g =>
-    completedIds.has(g.id) ? `✅ ${g.text}` : `⬜ ${g.text}`
-  );
+  let msg = `📋 *Today's Goals (${today})*\n`;
 
-  const allDone = dailyGoals.every(g => completedIds.has(g.id));
+  if (dailyGoals.length > 0) {
+    const lines = dailyGoals.map(g =>
+      completedDailyIds.has(g.id) ? `✅ ${g.text}` : `⬜ ${g.text}`
+    );
+    msg += `\n*Daily:*\n${lines.join('\n')}`;
+  }
+
+  if (oneoffGoals.length > 0) {
+    const lines = oneoffGoals.map(g =>
+      completedOneoffIds.has(g.id) ? `✅ ${g.text}` : `⬜ ${g.text}`
+    );
+    msg += `\n\n*One-off:*\n${lines.join('\n')}`;
+  }
+
+  const allDailyDone = dailyGoals.every(g => completedDailyIds.has(g.id));
   const { current } = await getStreaks();
 
-  let msg = `📋 *Today's Goals (${today})*\n\n${lines.join('\n')}\n\n🔥 Streak: ${current} day${current !== 1 ? 's' : ''}`;
-  if (allDone) msg += '\n\n🎉 All daily goals completed!';
+  msg += `\n\n🔥 Streak: ${current} day${current !== 1 ? 's' : ''}`;
+  if (allDailyDone && dailyGoals.length > 0) msg += '\n\n🎉 All daily goals completed!';
 
   await sendMessage(msg);
 }
