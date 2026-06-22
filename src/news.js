@@ -6,6 +6,7 @@ async function fetchFromNewsAPI(apiKey) {
   const res = await axios.get('https://newsapi.org/v2/top-headlines', {
     params: {
       language: 'en',
+      category: 'technology',
       pageSize: 15,
       apiKey,
     },
@@ -25,6 +26,7 @@ async function fetchFromGNews(apiKey) {
   const res = await axios.get('https://gnews.io/api/v4/top-headlines', {
     params: {
       lang: 'en',
+      topic: 'technology',
       max: 15,
       token: apiKey,
     },
