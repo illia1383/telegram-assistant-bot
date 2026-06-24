@@ -22,7 +22,7 @@ async function sendMorningDigest() {
     const articles = await fetchTopArticles();
     const digest = await summarizeNews(articles);
     await sendMessage(digest);
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: process.env.TIMEZONE || 'America/New_York' }).format(new Date());
     await logNewsSent(today, digest);
     console.log('[cron] Morning digest sent and logged');
   } catch (err) {
@@ -35,7 +35,7 @@ async function sendMorningDigest() {
 async function sendNightlyReminder() {
   console.log('[cron] Running nightly reminder job...');
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: process.env.TIMEZONE || 'America/New_York' }).format(new Date());
     const log = await getLogForDate(today);
 
     if (log?.completed_daily_goal_ids || log?.notes) {
@@ -55,7 +55,7 @@ async function sendNightlyReminder() {
 async function sendEveningCheckin() {
   console.log('[cron] Running evening check-in job...');
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: process.env.TIMEZONE || 'America/New_York' }).format(new Date());
     const [dailyGoals, log] = await Promise.all([
       getDailyGoals(true),
       getLogForDate(today),

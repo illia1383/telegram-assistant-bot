@@ -107,7 +107,8 @@ function rowsToObjects(rows) {
 }
 
 function todayString() {
-  return new Date().toISOString().split('T')[0];
+  const tz = process.env.TIMEZONE || 'America/New_York';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
 }
 
 // ─── Sheet initialization ─────────────────────────────────────────────────────
