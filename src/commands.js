@@ -1,4 +1,5 @@
 import { sendMessage } from './telegram.js';
+import { addApplication, updateStatus, getApplications } from './jobs.js';
 import { fetchTopArticles } from './news.js';
 import { summarizeNews, summarizeProgress } from './claude.js';
 import {
@@ -72,6 +73,59 @@ async function handleSummary(text) {
   await sendMessage(summary);
 }
 
+// ─── Commands: job application tracker ───────────────────────────────────────
+
+async function handleApplied(text) {
+  const body = text.replace(/^applied\s+to\s*:\s*/i, '').trim();
+  if (!body) {
+    await sendMessage('Usage: `applied to: <company name>`');
+    return;
+  }
+  const date = new Intl.DateTimeFormat('en-CA', {
+    timeZone: process.env.TIMEZONE || 'America/New_York',
+  }).format(new Date());
+  await addApplication(body, date);
+  await sendMessage(`Logged application to *${body}* on ${date} ✅\nStatus set to: Waiting`);
+}
+
+async function handleReject(text) {
+  const company = text.replace(/^rejected\s*:\s*/i, '').trim();
+  if (!company) {
+    await sendMessage('Usage: `rejected: <company name>`');
+    return;
+  }
+  const updated = await updateStatus(company, 'Rejected');
+  if (updated) {
+    await sendMessage(`Updated *${company}* → Rejected ❌`);
+  } else {
+    await sendMessage(`No application found for "${company}". Check the exact company name with \`applications\`.`);
+  }
+}
+
+async function handleApplications() {
+  const apps = await getApplications();
+  if (apps.length === 0) {
+    await sendMessage('No applications logged yet. Add one with `applied to: <company>`.');
+    return;
+  }
+
+  const waiting = apps.filter(a => a.status.toLowerCase() === 'waiting');
+  const rejected = apps.filter(a => a.status.toLowerCase() === 'rejected');
+
+  let msg = `📋 *Job Applications (${apps.length} total)*\n`;
+
+  if (waiting.length > 0) {
+    msg += `\n*Waiting (${waiting.length}):*\n`;
+    msg += waiting.map(a => `⏳ ${a.company} — ${a.dateApplied}`).join('\n');
+  }
+  if (rejected.length > 0) {
+    msg += `\n\n*Rejected (${rejected.length}):*\n`;
+    msg += rejected.map(a => `❌ ${a.company}`).join('\n');
+  }
+
+  await sendMessage(msg);
+}
+
 // ─── Command: news ───────────────────────────────────────────────────────────
 
 async function handleNews() {
@@ -88,6 +142,11 @@ async function handleHelp() {
 
 *Logging*
 Just type what you did — e.g. "did 3 leetcodes and applied to 2 jobs"
+
+*Jobs*
+\`applied to: <company>\` — log a new job application
+\`rejected: <company>\` — mark an application as rejected
+\`applications\` — view all applications by status
 
 *Goals*
 \`add daily: <text>\` — add a recurring daily goal
@@ -309,6 +368,18 @@ export async function routeMessage(text) {
   }
   if (/^help\b/i.test(text)) {
     await handleHelp();
+    return;
+  }
+  if (/^applied\s+to\s*:/i.test(text)) {
+    await handleApplied(text);
+    return;
+  }
+  if (/^rejected\s*:/i.test(text)) {
+    await handleReject(text);
+    return;
+  }
+  if (/^applications\b/i.test(text)) {
+    await handleApplications();
     return;
   }
   if (/^remove\s+daily\s*:/i.test(text)) {
