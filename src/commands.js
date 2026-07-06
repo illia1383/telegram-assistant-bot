@@ -2,6 +2,7 @@ import { sendMessage } from './telegram.js';
 import { addApplication, updateStatus, getApplications } from './jobs.js';
 import { fetchTopArticles } from './news.js';
 import { summarizeNews, summarizeProgress } from './claude.js';
+import { getEventsForDate, createEvent, formatEventsMessage } from './calendar.js';
 import {
   getDailyGoals,
   getOneoffGoals,
@@ -73,6 +74,52 @@ async function handleSummary(text) {
   await sendMessage(summary);
 }
 
+// ─── Commands: calendar ───────────────────────────────────────────────────────
+
+function todayOffset(days) {
+  const tz = process.env.TIMEZONE || 'America/New_York';
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
+}
+
+async function handleCalendar(text) {
+  const lower = text.toLowerCase();
+  const isTomorrow = lower.includes('tomorrow');
+  const date = isTomorrow ? todayOffset(1) : todayOffset(0);
+  const label = isTomorrow ? "Tomorrow's Calendar" : "Today's Calendar";
+
+  const events = await getEventsForDate(date);
+  await sendMessage(formatEventsMessage(events, label));
+}
+
+async function handleAddEvent(text) {
+  // Expected format: add event: <title> on <date> at <start> to <end>
+  // Example: add event: dentist on 2026-07-10 at 2:00pm to 3:00pm
+  const body = text.replace(/^add\s+event\s*:\s*/i, '').trim();
+
+  const match = body.match(/^(.+?)\s+on\s+(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2}(?:am|pm)?)\s+to\s+(\d{1,2}:\d{2}(?:am|pm)?)$/i);
+  if (!match) {
+    await sendMessage(
+      'Format: `add event: <title> on YYYY-MM-DD at <start> to <end>`\nExample: `add event: Dentist on 2026-07-10 at 2:00pm to 3:00pm`'
+    );
+    return;
+  }
+
+  const [, title, date, startRaw, endRaw] = match;
+
+  function to24h(t) {
+    const [time, meridiem] = t.toLowerCase().split(/(am|pm)/);
+    let [h, m] = time.split(':').map(Number);
+    if (meridiem === 'pm' && h !== 12) h += 12;
+    if (meridiem === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${String(m || 0).padStart(2, '0')}`;
+  }
+
+  await createEvent({ title, date, startTime: to24h(startRaw), endTime: to24h(endRaw) });
+  await sendMessage(`Added to calendar: *${title}*\n📅 ${date} · ${startRaw} – ${endRaw} ✅`);
+}
+
 // ─── Commands: job application tracker ───────────────────────────────────────
 
 async function handleApplied(text) {
@@ -142,6 +189,11 @@ async function handleHelp() {
 
 *Logging*
 Just type what you did — e.g. "did 3 leetcodes and applied to 2 jobs"
+
+*Calendar*
+\`calendar\` or \`calendar today\` — see today's events
+\`calendar tomorrow\` — see tomorrow's events
+\`add event: <title> on YYYY-MM-DD at <start> to <end>\` — create an event
 
 *Jobs*
 \`applied to: <company>\` — log a new job application
@@ -368,6 +420,14 @@ export async function routeMessage(text) {
   }
   if (/^help\b/i.test(text)) {
     await handleHelp();
+    return;
+  }
+  if (/^calendar\b/i.test(text)) {
+    await handleCalendar(text);
+    return;
+  }
+  if (/^add\s+event\s*:/i.test(text)) {
+    await handleAddEvent(text);
     return;
   }
   if (/^applied\s+to\s*:/i.test(text)) {

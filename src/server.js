@@ -8,6 +8,7 @@ import { getDailyGoals, getLogForDate, logNewsSent, initializeSheets } from './s
 import { fetchTopArticles } from './news.js';
 import { summarizeNews } from './claude.js';
 import { getStreaks } from './streaks.js';
+import { getEventsForDate, formatEventsMessage } from './calendar.js';
 
 // ─── Health check server (required for Railway to detect the service is up) ───
 
@@ -19,10 +20,21 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOS
 async function sendMorningDigest() {
   console.log('[cron] Running morning digest job...');
   try {
-    const articles = await fetchTopArticles();
-    const digest = await summarizeNews(articles);
-    await sendMessage(digest);
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: process.env.TIMEZONE || 'America/New_York' }).format(new Date());
+
+    const [articles, events] = await Promise.all([
+      fetchTopArticles(),
+      getEventsForDate(today).catch(err => {
+        console.error('[cron] Failed to fetch calendar events:', err.message);
+        return [];
+      }),
+    ]);
+
+    const digest = await summarizeNews(articles);
+    const calendarSection = formatEventsMessage(events, "Today's Calendar");
+
+    await sendMessage(digest);
+    await sendMessage(calendarSection);
     await logNewsSent(today, digest);
     console.log('[cron] Morning digest sent and logged');
   } catch (err) {
