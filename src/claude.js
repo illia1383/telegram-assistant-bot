@@ -1,4 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const LIFE_COACH_PROMPT = readFileSync(join(__dirname, '../prompts/life-coach.md'), 'utf8');
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -73,46 +79,63 @@ ${message}`;
 }
 
 // ─── summarizeProgress ───────────────────────────────────────────────────────
-// Takes a period label, log rows, goal maps, and returns a WhatsApp-friendly summary.
+// Deep life coach analysis using all available data sources.
 
-const PROGRESS_SYSTEM_PROMPT = `You are a personal accountability coach reviewing someone's goal tracking data.
-You will be given their daily logs and completed one-off goals over a time period.
-Write a concise, encouraging progress summary formatted for Telegram.
-
-Format:
-- Start with the period and total days logged
-- Highlight streaks and consistency patterns
-- List which daily goals they hit most/least
-- List one-off goals they completed
-- End with one motivational sentence
-
-Use *bold* for section labels. Keep it under 1000 characters. Be specific with numbers, not vague.`;
-
-export async function summarizeProgress(periodLabel, logs, dailyGoals, completedOneoffs) {
+export async function summarizeProgress(periodLabel, logs, dailyGoals, completedOneoffs, allOneoffs = [], applications = [], calendarEvents = []) {
   const goalMap = Object.fromEntries(dailyGoals.map(g => [g.id, g.text]));
 
+  // Daily log breakdown
   const logLines = logs.map(l => {
     const hitGoals = (l.completed_daily_goal_ids || '').split(',').filter(Boolean).map(id => goalMap[id] || id);
-    return `${l.date}: hit=[${hitGoals.join(', ') || 'none'}] all_hit=${l.all_daily_hit} notes="${l.notes || ''}"`;
+    const missedGoals = dailyGoals.filter(g => !(l.completed_daily_goal_ids || '').split(',').includes(g.id)).map(g => g.text);
+    return `${l.date}: completed=[${hitGoals.join(', ') || 'none'}] missed=[${missedGoals.join(', ') || 'none'}] all_hit=${l.all_daily_hit} notes="${l.notes || ''}"`;
   });
 
-  const oneoffLines = completedOneoffs.map(g => `${g.done_date}: ${g.text}`);
+  // Goal completion rates
+  const goalStats = dailyGoals.map(g => {
+    const hits = logs.filter(l => (l.completed_daily_goal_ids || '').split(',').includes(g.id)).length;
+    const pct = logs.length > 0 ? Math.round((hits / logs.length) * 100) : 0;
+    return `  "${g.text}": completed ${hits}/${logs.length} days (${pct}%)`;
+  });
 
-  const context = `Period: ${periodLabel}
-Days logged: ${logs.length}
+  // Pending one-off goals (not yet done)
+  const pendingOneoffs = allOneoffs.filter(g => g.done !== 'TRUE');
 
-Daily logs:
+  // Job applications breakdown
+  const waiting = applications.filter(a => a.status?.toLowerCase() === 'waiting');
+  const rejected = applications.filter(a => a.status?.toLowerCase() === 'rejected');
+
+  const context = `
+ANALYSIS PERIOD: ${periodLabel}
+TOTAL DAYS WITH LOGS: ${logs.length}
+DAYS ALL GOALS HIT: ${logs.filter(l => l.all_daily_hit === 'TRUE').length}
+
+=== ACTIVE DAILY GOALS & COMPLETION RATES ===
+${goalStats.join('\n') || '(none)'}
+
+=== DAILY LOG DETAIL ===
 ${logLines.join('\n') || '(none)'}
 
-Completed one-off goals:
-${oneoffLines.join('\n') || '(none)'}`;
+=== COMPLETED ONE-OFF GOALS THIS PERIOD ===
+${completedOneoffs.map(g => `  ${g.done_date}: ${g.text}`).join('\n') || '(none)'}
 
-  console.log('[claude] Calling summarizeProgress...');
+=== PENDING ONE-OFF GOALS (not yet done) ===
+${pendingOneoffs.map(g => `  added ${g.created_date}: ${g.text}`).join('\n') || '(none)'}
+
+=== JOB APPLICATIONS ===
+Total: ${applications.length} | Waiting: ${waiting.length} | Rejected: ${rejected.length}
+${applications.map(a => `  ${a.dateApplied}: ${a.company} — ${a.status}`).join('\n') || '(none)'}
+
+=== CALENDAR EVENTS THIS PERIOD ===
+${calendarEvents.length > 0 ? calendarEvents.map(e => `  ${e.date}: ${e.title} (${e.start}${e.allDay ? ', all day' : ` – ${e.end}`})`).join('\n') : '(none)'}
+`.trim();
+
+  console.log('[claude] Calling summarizeProgress (life coach)...');
 
   const response = await getClient().messages.create({
     model: MODEL,
-    max_tokens: 600,
-    system: PROGRESS_SYSTEM_PROMPT,
+    max_tokens: 1500,
+    system: LIFE_COACH_PROMPT,
     messages: [{ role: 'user', content: context }],
   });
 

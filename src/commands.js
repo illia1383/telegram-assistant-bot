@@ -48,30 +48,55 @@ async function handleSummary(text) {
     return;
   }
 
-  await sendMessage(`Generating your ${period.label.toLowerCase()} summary...`);
+  await sendMessage(`Analyzing your ${period.label.toLowerCase()}... This may take a moment.`);
 
+  const tz = process.env.TIMEZONE || 'America/New_York';
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - period.days);
-  const cutoffStr = cutoff.toISOString().split('T')[0];
+  const cutoffStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(cutoff);
 
-  const [allLogs, dailyGoals, allOneoffs] = await Promise.all([
+  // Pull all data sources in parallel
+  const [allLogs, dailyGoals, allOneoffs, applications] = await Promise.all([
     getAllLogs(),
-    getDailyGoals(false), // include inactive so we can map old IDs
+    getDailyGoals(false),
     getOneoffGoals(false),
+    getApplications().catch(() => []),
   ]);
 
   const logs = allLogs.filter(l => l.date >= cutoffStr);
-  const completedOneoffs = allOneoffs.filter(
-    g => g.done === 'TRUE' && g.done_date >= cutoffStr
-  );
+  const completedOneoffs = allOneoffs.filter(g => g.done === 'TRUE' && g.done_date >= cutoffStr);
 
-  if (logs.length === 0 && completedOneoffs.length === 0) {
+  // Fetch calendar events for each logged day
+  let calendarEvents = [];
+  try {
+    const { getEventsForDate } = await import('./calendar.js');
+    const uniqueDates = [...new Set(logs.map(l => l.date))];
+    const eventsByDay = await Promise.all(
+      uniqueDates.map(async date => {
+        const events = await getEventsForDate(date).catch(() => []);
+        return events.map(e => ({ ...e, date }));
+      })
+    );
+    calendarEvents = eventsByDay.flat();
+  } catch {
+    // Calendar not configured — skip silently
+  }
+
+  if (logs.length === 0 && completedOneoffs.length === 0 && applications.length === 0) {
     await sendMessage(`No data found for ${period.label.toLowerCase()} yet. Start logging and check back!`);
     return;
   }
 
-  const summary = await summarizeProgress(period.label, logs, dailyGoals, completedOneoffs);
-  await sendMessage(summary);
+  const summary = await summarizeProgress(period.label, logs, dailyGoals, completedOneoffs, allOneoffs, applications, calendarEvents);
+
+  // Telegram has a 4096 char limit — split if needed
+  if (summary.length <= 4096) {
+    await sendMessage(summary);
+  } else {
+    const mid = summary.lastIndexOf('\n', 4000);
+    await sendMessage(summary.slice(0, mid));
+    await sendMessage(summary.slice(mid).trim());
+  }
 }
 
 // ─── Commands: calendar ───────────────────────────────────────────────────────
