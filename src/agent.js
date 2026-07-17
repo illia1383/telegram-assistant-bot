@@ -45,6 +45,19 @@ export function trimHistory(msgs, max = MAX_HISTORY_MESSAGES) {
   return msgs.slice(cut);
 }
 
+// Llama 3.3 occasionally emits a malformed tool call (e.g. concatenating the
+// arguments onto the tool name) that Groq rejects with tool_use_failed before
+// it reaches us. Retry once without tools so the model answers in plain text.
+async function requestWithToolFallback(payload) {
+  try {
+    return await llmRequest(payload);
+  } catch (err) {
+    if (!err.message.includes('tool_use_failed')) throw err;
+    console.error('[agent] Tool call generation failed, retrying without tools:', err.message);
+    return llmRequest({ ...payload, tools: undefined, tool_choice: undefined });
+  }
+}
+
 export async function runAgent(userMessage, { isolated = false } = {}) {
   const system = buildSystemPrompt(await getMemoryContext());
 
@@ -56,7 +69,7 @@ export async function runAgent(userMessage, { isolated = false } = {}) {
   for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
     let data;
     try {
-      data = await llmRequest({
+      data = await requestWithToolFallback({
         max_tokens: 2000,
         messages: [{ role: 'system', content: system }, ...messages],
         tools: TOOLS,

@@ -97,6 +97,52 @@ test('LLM request failure returns a friendly message instead of throwing', async
   assert.match(reply, /error talking to the AI model/);
 });
 
+test('tool_use_failed triggers one retry without tools, not a crash', async () => {
+  const requests = [];
+  let call = 0;
+  globalThis.fetch = async (url, opts) => {
+    call++;
+    const body = JSON.parse(opts.body);
+    requests.push(body);
+    if (call === 1) {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({
+          error: {
+            message: "tool call validation failed: attempted to call tool 'web_search{\"query\": \"latest crypto news\"}' which was not in request.tools",
+            code: 'tool_use_failed',
+          },
+        }),
+      };
+    }
+    return okFor(body);
+  };
+
+  function okFor() {
+    return { ok: true, json: async () => ({ choices: [{ message: text('Bitcoin is up today.') }] }) };
+  }
+
+  const reply = await runAgent('what is the latest on crypto');
+
+  assert.equal(reply, 'Bitcoin is up today.');
+  assert.equal(call, 2);
+  assert.ok(requests[0].tools?.length > 0);
+  assert.equal(requests[1].tools, undefined);
+  assert.equal(requests[1].tool_choice, undefined);
+});
+
+test('a second tool_use_failed after the retry still falls back gracefully', async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 400,
+    text: async () => JSON.stringify({ error: { message: 'tool call validation failed', code: 'tool_use_failed' } }),
+  });
+
+  const reply = await runAgent('what is the latest on crypto');
+  assert.match(reply, /error talking to the AI model/);
+});
+
 test('LLM failure on a later turn (after a tool call) still returns gracefully', async () => {
   let call = 0;
   globalThis.fetch = async (url, opts) => {
