@@ -90,6 +90,29 @@ test('isolated runs do not touch history', async () => {
   assert.ok(!contents.includes('automation prompt'));
 });
 
+test('LLM request failure returns a friendly message instead of throwing', async () => {
+  globalThis.fetch = async () => ({ ok: false, status: 429, text: async () => 'rate limited' });
+
+  const reply = await runAgent('what is the latest on crypto');
+  assert.match(reply, /error talking to the AI model/);
+});
+
+test('LLM failure on a later turn (after a tool call) still returns gracefully', async () => {
+  let call = 0;
+  globalThis.fetch = async (url, opts) => {
+    call++;
+    if (call === 1) {
+      const message = toolCall('call_1', 'web_search', { query: 'crypto' });
+      return { ok: true, json: async () => ({ choices: [{ message }] }) };
+    }
+    return { ok: false, status: 500, text: async () => 'server error' };
+  };
+
+  const reply = await runAgent('what is the latest on crypto');
+  assert.match(reply, /error talking to the AI model/);
+  assert.equal(call, 2);
+});
+
 test('malformed tool arguments become an error result, not a crash', async () => {
   const requests = stubLlm([
     {

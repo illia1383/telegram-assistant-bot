@@ -54,12 +54,19 @@ export async function runAgent(userMessage, { isolated = false } = {}) {
   let finalText = '';
 
   for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
-    const data = await llmRequest({
-      max_tokens: 2000,
-      messages: [{ role: 'system', content: system }, ...messages],
-      tools: TOOLS,
-      tool_choice: 'auto',
-    });
+    let data;
+    try {
+      data = await llmRequest({
+        max_tokens: 2000,
+        messages: [{ role: 'system', content: system }, ...messages],
+        tools: TOOLS,
+        tool_choice: 'auto',
+      });
+    } catch (err) {
+      console.error('[agent] LLM request failed:', err.message);
+      finalText = 'I hit an error talking to the AI model — try again in a moment.';
+      break;
+    }
 
     const msg = data.choices?.[0]?.message;
     if (!msg) break;
