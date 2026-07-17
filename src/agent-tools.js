@@ -156,6 +156,56 @@ export const TOOLS = [
   def('web_search', 'Search the web for facts or current topics.', { query: { type: 'string' } }, ['query']),
 ];
 
+// ─── Tool selection ────────────────────────────────────────────────────────────
+// Sending all ~30 tool schemas on every request costs ~2000+ tokens before the
+// model even answers, which blows through Groq's free-tier TPM limit fast.
+// Only send the goal/search core (always relevant — check-ins and open
+// questions are the most common free text) plus whichever categories the
+// message's keywords suggest are actually needed.
+
+const CORE_TOOL_NAMES = [
+  'get_today_status', 'log_accomplishments', 'add_goal', 'remove_goal', 'get_streaks',
+  'get_news_headlines', 'web_search',
+];
+
+const TOOL_CATEGORIES = [
+  {
+    keywords: ['calendar', 'meeting', 'schedule', 'event', 'appointment', 'slot', 'reschedule', 'book'],
+    tools: ['get_calendar_events', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event', 'find_free_slots'],
+  },
+  {
+    keywords: ['email', 'gmail', 'inbox', 'draft', 'reply', 'recruiter', 'unread'],
+    tools: ['list_emails', 'read_email', 'draft_email', 'send_email', 'archive_email', 'mark_email_read'],
+  },
+  {
+    keywords: ['remind'],
+    tools: ['add_reminder', 'list_reminders', 'cancel_reminder'],
+  },
+  {
+    keywords: ['remember', 'forget', 'memory', 'memories', 'prefer'],
+    tools: ['remember', 'forget_memory', 'list_memories'],
+  },
+  {
+    keywords: ['automat', 'every day', 'every week', 'every weekday', 'cron', 'recurring'],
+    tools: ['create_automation', 'list_automations', 'delete_automation'],
+  },
+  {
+    keywords: ['job', 'application', 'applied', 'interview', 'offer', 'rejected'],
+    tools: ['add_job_application', 'update_job_status', 'list_job_applications'],
+  },
+];
+
+export function selectTools(message) {
+  const lower = message.toLowerCase();
+  const names = new Set(CORE_TOOL_NAMES);
+  for (const { keywords, tools } of TOOL_CATEGORIES) {
+    if (keywords.some(kw => lower.includes(kw))) {
+      for (const t of tools) names.add(t);
+    }
+  }
+  return TOOLS.filter(t => names.has(t.function.name));
+}
+
 export const EXECUTORS = {
   async get_today_status() {
     const today = todayString();

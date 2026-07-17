@@ -1,6 +1,6 @@
 import { llmRequest } from './llm.js';
 import { getMemoryContext } from './memory.js';
-import { TOOLS, EXECUTORS } from './agent-tools.js';
+import { EXECUTORS, selectTools } from './agent-tools.js';
 
 const MAX_AGENT_TURNS = 10;
 const MAX_HISTORY_MESSAGES = 24;
@@ -64,6 +64,7 @@ export async function runAgent(userMessage, { isolated = false } = {}) {
   const messages = isolated ? [] : history;
   messages.push({ role: 'user', content: userMessage });
 
+  const tools = selectTools(userMessage);
   let finalText = '';
 
   for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
@@ -72,7 +73,7 @@ export async function runAgent(userMessage, { isolated = false } = {}) {
       data = await requestWithToolFallback({
         max_tokens: 2000,
         messages: [{ role: 'system', content: system }, ...messages],
-        tools: TOOLS,
+        tools,
         tool_choice: 'auto',
       });
     } catch (err) {
