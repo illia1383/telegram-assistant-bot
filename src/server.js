@@ -6,9 +6,12 @@ import { initBot, sendMessage } from './telegram.js';
 import { routeMessage } from './commands.js';
 import { getDailyGoals, getLogForDate, logNewsSent, initializeSheets } from './sheets.js';
 import { fetchTopArticles } from './news.js';
-import { summarizeNews } from './claude.js';
+import { summarizeNews, summarizeInbox } from './llm.js';
 import { getStreaks } from './streaks.js';
 import { getEventsForDate, formatEventsMessage } from './calendar.js';
+import { getUnreadSummaryData } from './gmail.js';
+import { sweepReminders, getReminders } from './reminders.js';
+import { loadAutomations } from './automations.js';
 
 // ─── Health check server (required for Railway to detect the service is up) ───
 
@@ -20,22 +23,42 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOS
 async function sendMorningDigest() {
   console.log('[cron] Running morning digest job...');
   try {
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: process.env.TIMEZONE || 'America/New_York' }).format(new Date());
+    const tz = process.env.TIMEZONE || 'America/New_York';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
 
-    const [articles, events] = await Promise.all([
-      fetchTopArticles(),
+    const [articles, events, unreadEmails, reminders] = await Promise.all([
+      fetchTopArticles().catch(err => {
+        console.error('[cron] Failed to fetch news:', err.message);
+        return [];
+      }),
       getEventsForDate(today).catch(err => {
         console.error('[cron] Failed to fetch calendar events:', err.message);
         return [];
       }),
+      getUnreadSummaryData().catch(err => {
+        console.error('[cron] Failed to fetch unread emails:', err.message);
+        return null;
+      }),
+      getReminders(true).catch(() => []),
     ]);
 
-    const digest = await summarizeNews(articles);
-    const calendarSection = formatEventsMessage(events, "Today's Calendar");
+    if (articles.length > 0) {
+      const digest = await summarizeNews(articles);
+      await sendMessage(digest);
+      await logNewsSent(today, digest);
+    }
 
-    await sendMessage(digest);
-    await sendMessage(calendarSection);
-    await logNewsSent(today, digest);
+    await sendMessage(formatEventsMessage(events, "Today's Calendar"));
+
+    if (unreadEmails) {
+      await sendMessage(await summarizeInbox(unreadEmails));
+    }
+
+    const dueToday = reminders.filter(r => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(r.due_iso)) === today);
+    if (dueToday.length > 0) {
+      await sendMessage(`⏰ *Reminders today*\n${dueToday.map(r => `• ${r.text}`).join('\n')}`);
+    }
+
     console.log('[cron] Morning digest sent and logged');
   } catch (err) {
     console.error('[cron] Morning digest failed:', err.message);
@@ -124,6 +147,13 @@ async function start() {
   const nightlyTime = process.env.NIGHTLY_REMINDER_TIME || '50 23 * * *';
   cron.schedule(nightlyTime, sendNightlyReminder, { timezone });
   console.log(`[server] Nightly reminder scheduled: "${nightlyTime}" (${timezone})`);
+
+  // Fire due one-off reminders once a minute
+  cron.schedule('* * * * *', sweepReminders, { timezone });
+  console.log('[server] Reminder sweeper scheduled (every minute)');
+
+  // Schedule user-defined automations from the Automations sheet
+  await loadAutomations();
 
   // Health check HTTP server
   const port = process.env.PORT || 3000;

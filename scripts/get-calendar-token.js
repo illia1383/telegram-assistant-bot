@@ -1,8 +1,11 @@
-// Run this once locally to get your Google Calendar refresh token.
+// Run this once locally to get your Google refresh token (Calendar + Gmail).
 // Usage: node scripts/get-calendar-token.js
 // It will print a URL — open it in your browser, log in, approve access,
 // then paste the code it gives you back into the terminal.
 // Copy the printed refresh token into your .env as GOOGLE_CALENDAR_REFRESH_TOKEN.
+//
+// NOTE: if you previously generated a token with only the calendar scope,
+// re-run this script so the token also covers Gmail (email assistant features).
 
 import 'dotenv/config';
 import { google } from 'googleapis';
@@ -11,7 +14,10 @@ import readline from 'readline';
 const CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
 const REDIRECT_URI = 'urn:ietf:wg:oauth:2.0:oob';
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/gmail.modify',
+];
 
 const oAuth2Client = new google.auth.OAuth2(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
 

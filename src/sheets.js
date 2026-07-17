@@ -9,6 +9,9 @@ const TABS = {
   ONEOFF_GOALS: 'OneoffGoals',
   DAILY_LOG: 'DailyLog',
   NEWS_LOG: 'NewsLog',
+  MEMORY: 'Memory',
+  REMINDERS: 'Reminders',
+  AUTOMATIONS: 'Automations',
 };
 
 const HEADERS = {
@@ -16,6 +19,9 @@ const HEADERS = {
   [TABS.ONEOFF_GOALS]: ['id', 'text', 'done', 'created_date', 'done_date'],
   [TABS.DAILY_LOG]: ['date', 'completed_daily_goal_ids', 'completed_oneoff_ids', 'notes', 'all_daily_hit'],
   [TABS.NEWS_LOG]: ['date', 'summary_sent'],
+  [TABS.MEMORY]: ['id', 'fact', 'category', 'created_date'],
+  [TABS.REMINDERS]: ['id', 'text', 'due_iso', 'status', 'created_date'],
+  [TABS.AUTOMATIONS]: ['id', 'description', 'cron', 'prompt', 'active', 'created_date'],
 };
 
 let sheetsClient = null;
@@ -44,7 +50,7 @@ function getClient() {
 
 // ─── Low-level helpers ────────────────────────────────────────────────────────
 
-async function getSheetData(tabName) {
+export async function getSheetData(tabName) {
   const client = getClient();
   const res = await client.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
@@ -53,7 +59,7 @@ async function getSheetData(tabName) {
   return res.data.values || [];
 }
 
-async function appendRow(tabName, row) {
+export async function appendRow(tabName, row) {
   const client = getClient();
   await client.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
@@ -63,7 +69,7 @@ async function appendRow(tabName, row) {
   });
 }
 
-async function updateRow(tabName, sheetRowNumber, row) {
+export async function updateRow(tabName, sheetRowNumber, row) {
   // sheetRowNumber is 1-based (row 1 = headers, row 2 = first data row)
   const client = getClient();
   await client.spreadsheets.values.update({
@@ -74,7 +80,7 @@ async function updateRow(tabName, sheetRowNumber, row) {
   });
 }
 
-async function deleteRow(tabName, sheetRowNumber) {
+export async function deleteRow(tabName, sheetRowNumber) {
   const client = getClient();
   const meta = await client.spreadsheets.get({ spreadsheetId: SHEET_ID });
   const sheet = meta.data.sheets.find(s => s.properties.title === tabName);
@@ -98,7 +104,7 @@ async function deleteRow(tabName, sheetRowNumber) {
   });
 }
 
-function rowsToObjects(rows) {
+export function rowsToObjects(rows) {
   if (!rows || rows.length < 2) return [];
   const [headers, ...data] = rows;
   return data.map(row =>
@@ -114,6 +120,26 @@ function todayString() {
 // ─── Sheet initialization ─────────────────────────────────────────────────────
 
 export async function initializeSheets() {
+  // Create any missing tabs first, so new features work without manual sheet setup
+  try {
+    const client = getClient();
+    const meta = await client.spreadsheets.get({ spreadsheetId: SHEET_ID });
+    const existing = new Set(meta.data.sheets.map(s => s.properties.title));
+    const missing = Object.keys(HEADERS).filter(tab => !existing.has(tab));
+
+    if (missing.length > 0) {
+      await client.spreadsheets.batchUpdate({
+        spreadsheetId: SHEET_ID,
+        requestBody: {
+          requests: missing.map(title => ({ addSheet: { properties: { title } } })),
+        },
+      });
+      console.log(`[sheets] Created missing tabs: ${missing.join(', ')}`);
+    }
+  } catch (err) {
+    console.error('[sheets] Error creating missing tabs:', err.message);
+  }
+
   for (const [tab, headers] of Object.entries(HEADERS)) {
     try {
       const rows = await getSheetData(tab);
