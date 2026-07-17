@@ -1,7 +1,7 @@
 import { sendMessage } from './telegram.js';
 import { addApplication, updateStatus, getApplications } from './jobs.js';
 import { fetchTopArticles } from './news.js';
-import { summarizeNews, summarizeProgress } from './claude.js';
+import { summarizeNews, summarizeProgress } from './llm.js';
 import { getEventsForDate, createEvent, formatEventsMessage } from './calendar.js';
 import {
   getDailyGoals,
@@ -10,13 +10,11 @@ import {
   addOneoffGoal,
   removeDailyGoal,
   removeOneoffGoal,
-  markOneoffDone,
   getLogForDate,
-  upsertLogForDate,
   getAllLogs,
 } from './sheets.js';
-import { parseCheckinMessage } from './claude.js';
 import { getStreaks } from './streaks.js';
+import { runAgent, resetConversation } from './agent.js';
 
 function todayString() {
   const tz = process.env.TIMEZONE || 'America/New_York';
@@ -210,42 +208,27 @@ async function handleNews() {
 // ─── Command: help ───────────────────────────────────────────────────────────
 
 async function handleHelp() {
-  const msg = `*Available commands:*
+  const msg = `*Your AI Assistant* 🤖
 
-*Logging*
-Just type what you did — e.g. "did 3 leetcodes and applied to 2 jobs"
+Just talk to me naturally — I can handle things like:
+• "What's on my calendar Thursday?" / "Move my dentist appt to 4pm"
+• "Find me a free 30-min slot tomorrow"
+• "Summarize my unread emails" / "Draft a reply to the recruiter"
+• "Remind me at 5pm to call mom"
+• "Every weekday at 7am, send me my email summary" (automations)
+• "Remember that I prefer morning meetings"
+• "Did 3 leetcodes and applied to 2 jobs" (logs your goals)
+• "What's the latest on <anything>?" (web research)
 
-*Calendar*
-\`calendar\` or \`calendar today\` — see today's events
-\`calendar tomorrow\` — see tomorrow's events
-\`add event: <title> on YYYY-MM-DD at <start> to <end>\` — create an event
-
-*Jobs*
-\`applied to: <company>\` — log a new job application
-\`rejected: <company>\` — mark an application as rejected
-\`applications\` — view all applications by status
-
-*Goals*
-\`add daily: <text>\` — add a recurring daily goal
-\`add goal: <text>\` — add a one-off goal
-\`remove daily: <text>\` — remove a daily goal (exact name)
-\`remove goal: <text>\` — remove a one-off goal (exact name)
-
-*Check in*
-\`status\` or \`today\` — see today's goals and progress
-\`streak\` — see your current and best streak
-
-*News*
-\`news\` — fetch the latest news digest on demand
-
-*Summary*
-\`summary week\` — progress over the last 7 days
-\`summary month\` — progress over the last 30 days
-\`summary 3months\` — progress over the last 3 months
-\`summary year\` — progress over the last year
-
-*Help*
-\`help\` — show this message`;
+*Quick commands*
+\`status\` / \`today\` — today's goals · \`streak\` — streaks
+\`calendar\` / \`calendar tomorrow\` — events
+\`applications\` — job apps · \`applied to: <company>\` · \`rejected: <company>\`
+\`add daily: <text>\` · \`add goal: <text>\` · \`remove daily/goal: <text>\`
+\`news\` — news digest
+\`summary week|month|3months|year\` — progress reports
+\`reset\` — start a fresh conversation
+\`help\` — this message`;
   await sendMessage(msg);
 }
 
@@ -362,74 +345,21 @@ async function handleStatus() {
   await sendMessage(msg);
 }
 
-// ─── Check-in: free-text parsing via Claude ───────────────────────────────────
+// ─── Everything else: the conversational AI agent ─────────────────────────────
+// Free text (check-ins, email, scheduling, reminders, research, ...) goes to the
+// LLM tool-use agent, which takes real actions and replies naturally.
 
-async function handleCheckin(userMessage) {
-  const today = todayString();
+async function handleAgent(userMessage) {
+  const reply = await runAgent(userMessage);
 
-  const [dailyGoals, oneoffGoals, existingLog] = await Promise.all([
-    getDailyGoals(true),
-    getOneoffGoals(true),
-    getLogForDate(today),
-  ]);
-
-  console.log('[commands] Parsing check-in message with Claude...');
-  const parsed = await parseCheckinMessage(userMessage, dailyGoals, oneoffGoals);
-
-  if (!parsed) {
-    await sendMessage(
-      "I had trouble understanding that. Could you be more specific? For example: \"did 3 leetcodes, applied to 2 jobs, finished resume\""
-    );
-    return;
+  // Telegram has a 4096 char limit — split if needed
+  if (reply.length <= 4096) {
+    await sendMessage(reply);
+  } else {
+    const mid = reply.lastIndexOf('\n', 4000);
+    await sendMessage(reply.slice(0, mid > 0 ? mid : 4000));
+    await sendMessage(reply.slice(mid > 0 ? mid : 4000).trim());
   }
-
-  // Merge with any existing log entries for today
-  const existingDailyIds = (existingLog?.completed_daily_goal_ids || '').split(',').filter(Boolean);
-  const existingOneoffIds = (existingLog?.completed_oneoff_ids || '').split(',').filter(Boolean);
-
-  const mergedDailyIds = [...new Set([...existingDailyIds, ...parsed.completed_daily_goal_ids])];
-  const mergedOneoffIds = [...new Set([...existingOneoffIds, ...parsed.completed_oneoff_ids])];
-
-  const allDailyHit = dailyGoals.every(g => mergedDailyIds.includes(g.id));
-
-  await upsertLogForDate(today, {
-    completed_daily_goal_ids: mergedDailyIds.join(','),
-    completed_oneoff_ids: mergedOneoffIds.join(','),
-    notes: parsed.notes,
-    all_daily_hit: allDailyHit,
-  });
-
-  for (const id of parsed.completed_oneoff_ids) {
-    await markOneoffDone(id);
-  }
-
-  // Build confirmation message
-  const completedDailyNames = dailyGoals
-    .filter(g => parsed.completed_daily_goal_ids.includes(g.id))
-    .map(g => `✅ ${g.text}`);
-
-  const completedOneoffNames = oneoffGoals
-    .filter(g => parsed.completed_oneoff_ids.includes(g.id))
-    .map(g => `✅ ${g.text}`);
-
-  const { current } = await getStreaks();
-
-  let msg = `Logged for ${today}! 📝\n`;
-
-  if (completedDailyNames.length > 0) {
-    msg += `\n*Daily goals:*\n${completedDailyNames.join('\n')}`;
-  }
-  if (completedOneoffNames.length > 0) {
-    msg += `\n\n*One-off goals:*\n${completedOneoffNames.join('\n')}`;
-  }
-  if (completedDailyNames.length === 0 && completedOneoffNames.length === 0) {
-    msg += '\n(No goals matched — try being more specific.)';
-  }
-
-  msg += `\n\n🔥 Streak: ${current} day${current !== 1 ? 's' : ''}`;
-  if (allDailyHit) msg += '\n🎉 All daily goals hit today!';
-
-  await sendMessage(msg);
 }
 
 // ─── Main router ──────────────────────────────────────────────────────────────
@@ -491,6 +421,11 @@ export async function routeMessage(text) {
     await handleStatus();
     return;
   }
-  // Fall through to Claude check-in parser
-  await handleCheckin(text);
+  if (/^(reset|new chat)\b/i.test(text)) {
+    resetConversation();
+    await sendMessage('🧹 Fresh start! Conversation history cleared.');
+    return;
+  }
+  // Everything else goes to the AI agent (check-ins, email, scheduling, ...)
+  await handleAgent(text);
 }

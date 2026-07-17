@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -6,13 +5,35 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LIFE_COACH_PROMPT = readFileSync(join(__dirname, '../prompts/life-coach.md'), 'utf8');
 
-const MODEL = 'claude-haiku-4-5-20251001';
+// Any OpenAI-compatible endpoint works: Groq, OpenRouter, Together, local Ollama, vLLM.
+export async function llmRequest(payload) {
+  const baseUrl = (process.env.LLM_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
 
-let client = null;
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${process.env.LLM_API_KEY || 'none'}`,
+    },
+    body: JSON.stringify({
+      ...payload,
+      model: payload.model || process.env.LLM_MODEL || 'llama-3.3-70b-versatile',
+    }),
+  });
 
-function getClient() {
-  if (!client) client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-  return client;
+  if (!res.ok) throw new Error(`LLM API error ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+async function chat(system, user, maxTokens) {
+  const data = await llmRequest({
+    max_tokens: maxTokens,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  });
+  return data.choices?.[0]?.message?.content ?? '';
 }
 
 // ─── parseCheckinMessage ──────────────────────────────────────────────────────
@@ -37,6 +58,26 @@ Rules:
 - IDs must come from the provided lists. Do not invent IDs.
 - The "notes" field should capture the essence of what was done in plain language.`;
 
+// Open models often wrap JSON in fences or prose — extract the outermost object.
+export function extractCheckinJson(raw) {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (
+      !Array.isArray(parsed.completed_daily_goal_ids) ||
+      !Array.isArray(parsed.completed_oneoff_ids)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export async function parseCheckinMessage(message, dailyGoals, oneoffGoals) {
   const goalsContext = `
 ACTIVE DAILY GOALS:
@@ -48,34 +89,12 @@ ${oneoffGoals.map(g => `  id="${g.id}" → ${g.text}`).join('\n') || '  (none)'}
 USER MESSAGE:
 ${message}`;
 
-  console.log('[claude] Calling parseCheckinMessage...');
+  console.log('[llm] Calling parseCheckinMessage...');
+  const raw = await chat(CHECKIN_SYSTEM_PROMPT, goalsContext, 512);
 
-  const response = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 512,
-    system: CHECKIN_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: goalsContext }],
-  });
-
-  const raw = response.content[0]?.text ?? '';
-  console.log('[claude] Raw parseCheckinMessage response:', raw);
-
-  // Strip markdown fences if Claude added them despite instructions
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
-
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (
-      !Array.isArray(parsed.completed_daily_goal_ids) ||
-      !Array.isArray(parsed.completed_oneoff_ids)
-    ) {
-      throw new Error('Schema mismatch');
-    }
-    return parsed;
-  } catch (err) {
-    console.error('[claude] Failed to parse JSON response:', err.message);
-    return null;
-  }
+  const parsed = extractCheckinJson(raw);
+  if (!parsed) console.error('[llm] Failed to parse check-in JSON response');
+  return parsed;
 }
 
 // ─── summarizeProgress ───────────────────────────────────────────────────────
@@ -130,21 +149,14 @@ ${applications.map(a => `  ${a.dateApplied}: ${a.company} — ${a.status}`).join
 ${calendarEvents.length > 0 ? calendarEvents.map(e => `  ${e.date}: ${e.title} (${e.start}${e.allDay ? ', all day' : ` – ${e.end}`})`).join('\n') : '(none)'}
 `.trim();
 
-  console.log('[claude] Calling summarizeProgress (life coach)...');
-
-  const response = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    system: LIFE_COACH_PROMPT,
-    messages: [{ role: 'user', content: context }],
-  });
-
-  return response.content[0]?.text ?? 'Could not generate summary.';
+  console.log('[llm] Calling summarizeProgress (life coach)...');
+  const text = await chat(LIFE_COACH_PROMPT, context, 1500);
+  return text || 'Could not generate summary.';
 }
 
 // ─── summarizeNews ────────────────────────────────────────────────────────────
 // Takes an array of { title, description, url, source } objects and returns
-// a WhatsApp-friendly digest string.
+// a Telegram-friendly digest string.
 
 const NEWS_SYSTEM_PROMPT = `You are a concise news summarizer writing for WhatsApp.
 Summarize the provided news articles into a morning digest.
@@ -163,14 +175,33 @@ export async function summarizeNews(articles) {
     .map((a, i) => `${i + 1}. ${a.title}\n   ${a.description ?? ''}`)
     .join('\n\n');
 
-  console.log('[claude] Calling summarizeNews...');
+  console.log('[llm] Calling summarizeNews...');
+  const text = await chat(NEWS_SYSTEM_PROMPT, articlesText, 600);
+  return text || 'Could not generate news digest.';
+}
 
-  const response = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 600,
-    system: NEWS_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: articlesText }],
-  });
+// ─── summarizeInbox ───────────────────────────────────────────────────────────
+// Takes an array of { from, subject, snippet } and returns a short triage digest.
 
-  return response.content[0]?.text ?? 'Could not generate news digest.';
+const INBOX_SYSTEM_PROMPT = `You are an email triage assistant writing for Telegram.
+Summarize the unread emails into a short morning triage.
+
+Format requirements:
+- Start with: "📧 *Inbox* — N unread" (N = the count given)
+- Group by importance: anything urgent/actionable first, then FYI, skip obvious spam/promos entirely
+- One line per email: *Sender* — what they want, in a few words
+- If nothing needs attention, say so in one line
+- Total length: under 900 characters
+- Only *asterisk* bold, no other markdown`;
+
+export async function summarizeInbox(emails) {
+  if (!emails || emails.length === 0) return '📧 *Inbox* — no unread emails. Clean slate!';
+
+  const emailsText = emails
+    .map((e, i) => `${i + 1}. From: ${e.from}\n   Subject: ${e.subject}\n   ${e.snippet}`)
+    .join('\n\n');
+
+  console.log('[llm] Calling summarizeInbox...');
+  const text = await chat(INBOX_SYSTEM_PROMPT, `UNREAD COUNT: ${emails.length}\n\n${emailsText}`, 500);
+  return text || 'Could not summarize inbox.';
 }

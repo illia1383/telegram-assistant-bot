@@ -1,6 +1,22 @@
 # Telegram Assistant Bot
 
-A personal accountability + assistant bot you text on Telegram. Tracks daily recurring goals, one-off goals, sends a morning news digest, and an evening check-in. All data lives in a Google Sheet.
+A personal AI assistant you text on Telegram — an agent that manages your email, calendar, goals, reminders, and automations. All data lives in a Google Sheet.
+
+## Assistant features
+
+Talk to it naturally — free text goes through an LLM agent that takes real actions with tools:
+
+- **Email agent** — "summarize my unread emails", "draft a reply to the recruiter". Reads, triages, and drafts in Gmail (drafts by default; it only sends after you confirm the exact content).
+- **Meeting scheduler** — "what's on Thursday?", "find me a free 30-min slot tomorrow", "move my dentist appointment to 4pm". Lists, creates, reschedules, and deletes Google Calendar events, and finds free slots.
+- **Reminders** — "remind me at 5pm to call mom". One-off reminders fire as Telegram messages (checked every minute).
+- **Automations** — "every weekday at 7am, send me my email summary". Stores a cron schedule + prompt; each tick runs the agent and messages you the result.
+- **Memory** — "remember that I prefer morning meetings". Facts persist in the sheet and are injected into every conversation. The agent also saves preferences and corrections proactively.
+- **Web research** — "what's the latest on X?" via keyless DuckDuckGo/Wikipedia search, plus the news digest.
+- **Goal tracking** — daily + one-off goals, streaks, check-ins ("did 3 leetcodes"), weekly/monthly life-coach summaries.
+- **Job application tracker** — log applications and status changes by chat.
+- **Daily briefing** — the morning digest bundles news, today's calendar, unread-email triage, and reminders due today.
+
+Send `reset` to clear the conversation history, `help` for the command list.
 
 ---
 
@@ -18,8 +34,8 @@ Telegram servers ◄─── long-polling ───► src/telegram.js
                         │              (morning/evening)      (send messages)
               ┌─────────┴─────────┐
               ▼                   ▼
-        src/claude.js       src/sheets.js
-      (parse intent,      (read/write goals
+        src/llm.js       src/sheets.js
+      (open-source LLM:      (read/write goals
        summarize news)      & logs via
                            Google Sheets API)
 ```
@@ -67,9 +83,9 @@ The bot uses **long-polling** — it constantly asks Telegram "any new messages?
 8. Copy the spreadsheet ID from its URL → `GOOGLE_SHEET_ID`
 9. Share the spreadsheet with the service account email (e.g. `bot@your-project.iam.gserviceaccount.com`) with **Editor** access.
 
-### 4. Anthropic API Key
+### 4. LLM API Key (open-source models)
 
-Sign up at [console.anthropic.com](https://console.anthropic.com), create a key → `ANTHROPIC_API_KEY`
+The bot talks to any OpenAI-compatible endpoint. Easiest free option: sign up at [console.groq.com](https://console.groq.com), create a key → `LLM_API_KEY` (defaults use Groq + Llama 3.3 70B). To run fully local instead, install [Ollama](https://ollama.com) and set `LLM_BASE_URL=http://localhost:11434/v1` and `LLM_MODEL=llama3.2` — no key needed.
 
 ### 5. News API Key
 
@@ -118,7 +134,12 @@ No ngrok needed. The bot polls Telegram directly.
 | `add goal: <text>` | Add a one-off goal |
 | `streak` | Show current and best streak |
 | `status` or `today` | Show today's goals and which are checked off |
-| Any other text | Claude parses it as a check-in and logs completed goals |
+| `calendar` / `calendar tomorrow` | List events |
+| `applications` / `applied to: <company>` / `rejected: <company>` | Job tracker |
+| `news` | News digest on demand |
+| `summary week\|month\|3months\|year` | Life-coach progress report |
+| `reset` | Clear the agent's conversation history |
+| Any other text | Goes to the AI agent — check-ins, email, scheduling, reminders, automations, research |
 
 ---
 
@@ -134,6 +155,15 @@ No ngrok needed. The bot polls Telegram directly.
 | Check today | Send `status` |
 | Morning digest | Temporarily change `MORNING_DIGEST_TIME=* * * * *` (every minute), watch logs |
 | Evening check-in | Same — temporarily change `EVENING_CHECKIN_TIME` |
+| Email agent | Send `summarize my unread emails` (needs Gmail scope — see note below) |
+| Scheduler | Send `find me a free 30 min slot tomorrow` |
+| Reminder | Send `remind me in 2 minutes to stretch`, wait for the ping |
+| Automation | Send `every day at 9am send me my calendar` — confirm, then check the Automations tab |
+| Memory | Send `remember that I prefer morning meetings`, then `what do you remember about me?` |
+
+> **Gmail scope**: if your `GOOGLE_CALENDAR_REFRESH_TOKEN` predates the email features, re-run `node scripts/get-calendar-token.js` — it now requests Calendar + Gmail scopes — and update the token in `.env`.
+
+> **Sheet tabs**: the new `Memory`, `Reminders`, and `Automations` tabs are created automatically on first boot.
 
 ---
 
@@ -147,7 +177,9 @@ See `.env.example` for the full list with inline comments.
 | `TELEGRAM_CHAT_ID` | Yes | Your personal numeric Telegram chat ID |
 | `GOOGLE_SHEET_ID` | Yes | ID from the Google Spreadsheet URL |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | File path or inline JSON of service account key |
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
+| `LLM_API_KEY` | Yes* | API key for the LLM endpoint (*not needed for local Ollama) |
+| `LLM_BASE_URL` | No | OpenAI-compatible base URL (default: Groq) |
+| `LLM_MODEL` | No | Model name (default: llama-3.3-70b-versatile) |
 | `NEWS_API_KEY` | Yes | newsapi.org or gnews.io key |
 | `NEWS_API_PROVIDER` | Yes | `newsapi` or `gnews` |
 | `TIMEZONE` | Yes | tz name, e.g. `America/New_York` |
