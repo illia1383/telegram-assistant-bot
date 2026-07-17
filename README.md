@@ -85,7 +85,7 @@ The bot uses **long-polling** — it constantly asks Telegram "any new messages?
 
 ### 4. LLM API Key (open-source models)
 
-The bot talks to any OpenAI-compatible endpoint. Easiest free option: sign up at [console.groq.com](https://console.groq.com), create a key → `LLM_API_KEY` (defaults use Groq + Llama 3.3 70B). To run fully local instead, install [Ollama](https://ollama.com) and set `LLM_BASE_URL=http://localhost:11434/v1` and `LLM_MODEL=llama3.2` — no key needed.
+The bot talks to any OpenAI-compatible endpoint. Easiest free option: sign up at [console.groq.com](https://console.groq.com), create a key → `LLM_API_KEY` (defaults use Groq + Llama 4 Scout 17B — light and fast, with a much higher free-tier token limit than the larger 70B model). To run fully local instead, install [Ollama](https://ollama.com) and set `LLM_BASE_URL=http://localhost:11434/v1` and `LLM_MODEL=llama3.2` — no key needed.
 
 ### 5. News API Key
 
@@ -179,7 +179,7 @@ See `.env.example` for the full list with inline comments.
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | File path or inline JSON of service account key |
 | `LLM_API_KEY` | Yes* | API key for the LLM endpoint (*not needed for local Ollama) |
 | `LLM_BASE_URL` | No | OpenAI-compatible base URL (default: Groq) |
-| `LLM_MODEL` | No | Model name (default: llama-3.3-70b-versatile) |
+| `LLM_MODEL` | No | Model name (default: meta-llama/llama-4-scout-17b-16e-instruct) |
 | `NEWS_API_KEY` | Yes | newsapi.org or gnews.io key |
 | `NEWS_API_PROVIDER` | Yes | `newsapi` or `gnews` |
 | `TIMEZONE` | Yes | tz name, e.g. `America/New_York` |
