@@ -23,6 +23,7 @@ function buildSystemPrompt(memoryContext) {
 CURRENT DATE & TIME: ${dateStr} (timezone: ${tz})
 
 RULES:
+- You already have authenticated access to the user's email and calendar via OAuth set up by the developer. NEVER ask the user for a password, login, or any account credentials — there is no scenario where that's needed. If a tool fails or isn't available, say there was a technical issue and to try again shortly.
 - Use tools to take real actions. Chain tools when needed (get_today_status before log_accomplishments; get_calendar_events before update/delete).
 - NEVER send an email without the user explicitly confirming the exact content. Default to draft_email and show the draft text in your reply.
 - Confirm before deleting calendar events or forgetting memories, unless the user explicitly asked.

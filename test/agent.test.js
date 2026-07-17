@@ -39,6 +39,13 @@ test('plain text reply comes straight back', async () => {
   assert.ok(Array.isArray(body.tools) && body.tools.length > 0);
 });
 
+test('system prompt forbids ever asking the user for credentials', async () => {
+  const requests = stubLlm([text('ok')]);
+  await runAgent('summarize my unread emails');
+
+  assert.match(requests[0].body.messages[0].content, /NEVER ask the user for a password/i);
+});
+
 test('tools are sent in OpenAI function format', async () => {
   const requests = stubLlm([text('ok')]);
   await runAgent('hi');
