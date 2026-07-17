@@ -46,6 +46,40 @@ test('system prompt forbids ever asking the user for credentials', async () => {
   assert.match(requests[0].body.messages[0].content, /NEVER ask the user for a password/i);
 });
 
+test('system prompt forbids fabricating tool data', async () => {
+  const requests = stubLlm([text('ok')]);
+  await runAgent('summarize my unread emails');
+
+  assert.match(requests[0].body.messages[0].content, /NEVER invent or guess real-world data/i);
+});
+
+test('tool_use_failed retry injects an explicit no-fabrication reminder', async () => {
+  const requests = [];
+  let call = 0;
+  globalThis.fetch = async (url, opts) => {
+    call++;
+    const body = JSON.parse(opts.body);
+    requests.push(body);
+    if (call === 1) {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({
+          error: { message: 'tool call validation failed: bad schema', code: 'tool_use_failed' },
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ choices: [{ message: text('Sorry, technical hiccup — try again shortly.') }] }) };
+  };
+
+  const reply = await runAgent('summarize my unread emails');
+
+  assert.match(reply, /technical hiccup/);
+  assert.equal(call, 2);
+  const retryMessages = requests[1].messages;
+  assert.match(retryMessages.at(-1).content, /Do NOT invent or guess any data/i);
+});
+
 test('tools are sent in OpenAI function format', async () => {
   const requests = stubLlm([text('ok')]);
   await runAgent('hi');

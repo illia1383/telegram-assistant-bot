@@ -24,6 +24,7 @@ CURRENT DATE & TIME: ${dateStr} (timezone: ${tz})
 
 RULES:
 - You already have authenticated access to the user's email and calendar via OAuth set up by the developer. NEVER ask the user for a password, login, or any account credentials — there is no scenario where that's needed. If a tool fails or isn't available, say there was a technical issue and to try again shortly.
+- NEVER invent or guess real-world data — emails, calendar events, reminders, search results, or anything else that comes from a tool. Only report what a tool actually returned. If you don't have a successful tool result for something, say you couldn't retrieve it right now rather than making up a plausible-looking answer.
 - Use tools to take real actions. Chain tools when needed (get_today_status before log_accomplishments; get_calendar_events before update/delete).
 - NEVER send an email without the user explicitly confirming the exact content. Default to draft_email and show the draft text in your reply.
 - Confirm before deleting calendar events or forgetting memories, unless the user explicitly asked.
@@ -55,7 +56,11 @@ async function requestWithToolFallback(payload) {
   } catch (err) {
     if (!err.message.includes('tool_use_failed')) throw err;
     console.error('[agent] Tool call generation failed, retrying without tools:', err.message);
-    return llmRequest({ ...payload, tools: undefined, tool_choice: undefined });
+    const reminder = {
+      role: 'system',
+      content: 'A tool call just failed due to a technical error and you have no tool access for this reply. Tell the user there was a technical hiccup and to try again shortly. Do NOT invent or guess any data.',
+    };
+    return llmRequest({ ...payload, tools: undefined, tool_choice: undefined, messages: [...payload.messages, reminder] });
   }
 }
 

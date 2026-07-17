@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOLS, selectTools } from '../src/agent-tools.js';
+import { TOOLS, selectTools, asNumber } from '../src/agent-tools.js';
 
 const names = (tools) => tools.map(t => t.function.name);
 
@@ -47,4 +47,20 @@ test('core tools are always present regardless of category matches', () => {
 test('selected tool count is meaningfully smaller than the full set', () => {
   // Guards against the token-budget fix silently regressing back to sending everything.
   assert.ok(selectTools('did 3 leetcodes').length <= TOOLS.length / 2);
+});
+
+test('asNumber coerces stringified numbers (Llama 4 Scout sends "10" for max_results)', () => {
+  assert.equal(asNumber('10', 5), 10);
+  assert.equal(asNumber(10, 5), 10);
+});
+
+test('asNumber falls back on missing or invalid input', () => {
+  assert.equal(asNumber(undefined, 30), 30);
+  assert.equal(asNumber('not a number', 30), 30);
+});
+
+test('numeric tool params accept both number and string types (Groq schema)', () => {
+  const byName = Object.fromEntries(TOOLS.map(t => [t.function.name, t.function.parameters.properties]));
+  assert.deepEqual(byName.list_emails.max_results.type, ['number', 'string']);
+  assert.deepEqual(byName.find_free_slots.duration_minutes.type, ['number', 'string']);
 });

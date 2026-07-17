@@ -18,6 +18,14 @@ import { createAutomation, getAutomations, deleteAutomation } from './automation
 import { addApplication, updateStatus, getApplications } from './jobs.js';
 import { fetchTopArticles } from './news.js';
 
+// Llama 4 Scout sometimes sends numeric tool arguments as strings (e.g. "10"
+// instead of 10), which Groq's schema validation used to reject outright.
+// Params are typed to accept either; this coerces whatever comes through.
+export function asNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function todayString() {
   const tz = process.env.TIMEZONE || 'America/New_York';
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -96,14 +104,14 @@ export const TOOLS = [
   }, ['event_id']),
   def('find_free_slots', 'Find open time windows on a day for scheduling.', {
     date: { type: 'string', description: 'YYYY-MM-DD' },
-    duration_minutes: { type: 'number', description: 'Default 30' },
+    duration_minutes: { type: ['number', 'string'], description: 'Default 30' },
     earliest: { type: 'string', description: 'HH:MM, default 09:00' },
     latest: { type: 'string', description: 'HH:MM, default 18:00' },
   }, ['date']),
 
   def('list_emails', 'List/search emails with Gmail query syntax (e.g. "is:unread", "from:linkedin.com newer_than:7d").', {
     query: { type: 'string', description: 'Default "in:inbox"' },
-    max_results: { type: 'number', description: 'Default 10, max 25' },
+    max_results: { type: ['number', 'string'], description: 'Default 10, max 25' },
   }),
   def('read_email', 'Read the full body of an email by ID.', {
     email_id: { type: 'string' },
@@ -283,12 +291,12 @@ export const EXECUTORS = {
   },
 
   async find_free_slots({ date, duration_minutes, earliest, latest }) {
-    const slots = await findFreeSlots(date, duration_minutes ?? 30, earliest ?? '09:00', latest ?? '18:00');
+    const slots = await findFreeSlots(date, asNumber(duration_minutes, 30), earliest ?? '09:00', latest ?? '18:00');
     return { date, free_slots: slots };
   },
 
   async list_emails({ query, max_results } = {}) {
-    return { emails: await listEmails({ query: query || 'in:inbox', maxResults: Math.min(max_results ?? 10, 25) }) };
+    return { emails: await listEmails({ query: query || 'in:inbox', maxResults: Math.min(asNumber(max_results, 10), 25) }) };
   },
 
   async read_email({ email_id }) {
