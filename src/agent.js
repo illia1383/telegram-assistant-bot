@@ -3,7 +3,11 @@ import { getMemoryContext } from './memory.js';
 import { EXECUTORS, selectTools } from './agent-tools.js';
 
 const MAX_AGENT_TURNS = 10;
-const MAX_HISTORY_MESSAGES = 24;
+// Every turn resends the full history array (stateless API), so this caps how
+// much accumulated context — including tool results — gets billed repeatedly
+// within one conversation. Lowered from 24 after tool-result payloads (email
+// bodies, calendar events) were found to compound TPM usage turn over turn.
+const MAX_HISTORY_MESSAGES = 12;
 
 let history = [];
 
@@ -77,7 +81,7 @@ export async function runAgent(userMessage, { isolated = false } = {}) {
     let data;
     try {
       data = await requestWithToolFallback({
-        max_tokens: 2000,
+        max_tokens: 800, // system prompt already asks for short Telegram replies
         messages: [{ role: 'system', content: system }, ...messages],
         tools,
         tool_choice: 'auto',

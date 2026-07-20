@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { runAgent, resetConversation } from '../src/agent.js';
+import { runAgent, resetConversation, trimHistory } from '../src/agent.js';
 
 // getMemoryContext hits Google Sheets — point it at nothing so it fails fast
 // and the agent still runs (memory is injected best-effort).
@@ -215,4 +215,21 @@ test('malformed tool arguments become an error result, not a crash', async () =>
   const toolMsg = requests[1].body.messages.at(-1);
   assert.equal(toolMsg.role, 'tool');
   assert.match(toolMsg.content, /error/);
+});
+
+test('trimHistory caps retained messages at 12 by default', () => {
+  // Guards against the rate-limit fix silently drifting back toward resending
+  // a huge conversation history (and its tool-result payloads) every turn.
+  const msgs = Array.from({ length: 20 }, (_, i) => ({ role: 'user', content: `msg ${i}` }));
+  assert.equal(trimHistory(msgs).length, 12);
+});
+
+test('trimHistory never leaves an orphaned tool result at the start', () => {
+  const msgs = [
+    { role: 'user', content: 'a' },
+    { role: 'tool', tool_call_id: '1', content: 'orphan' },
+    { role: 'user', content: 'b' },
+  ];
+  const trimmed = trimHistory(msgs, 2);
+  assert.equal(trimmed[0].role, 'user');
 });

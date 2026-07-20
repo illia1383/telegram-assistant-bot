@@ -13,6 +13,13 @@ function header(headers, name) {
   return headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 }
 
+// Caps email body length before it enters the agent's conversation history —
+// that history gets resent on every subsequent turn, so an untruncated body
+// compounds TPM cost fast. 2000 chars is plenty to summarize or draft a reply.
+export function truncateBody(body, maxLength = 2000) {
+  return body.length > maxLength ? body.slice(0, maxLength) + '\n...[truncated]' : body;
+}
+
 // Recursively find the text/plain (fallback text/html) body in a MIME tree
 export function extractBody(payload) {
   if (!payload) return '';
@@ -83,7 +90,7 @@ export async function readEmail(id) {
     subject: header(headers, 'Subject'),
     date: header(headers, 'Date'),
     messageIdHeader: header(headers, 'Message-ID'),
-    body: body.length > 8000 ? body.slice(0, 8000) + '\n...[truncated]' : body,
+    body: truncateBody(body),
   };
 }
 

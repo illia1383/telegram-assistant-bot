@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractBody, buildRawMessage } from '../src/gmail.js';
+import { extractBody, buildRawMessage, truncateBody } from '../src/gmail.js';
 
 const b64 = s => Buffer.from(s, 'utf8').toString('base64url');
 
@@ -57,4 +57,20 @@ test('buildRawMessage: reply sets In-Reply-To and References', () => {
   const decoded = Buffer.from(raw, 'base64url').toString('utf8');
   assert.match(decoded, /In-Reply-To: <msg123@mail>\r\n/);
   assert.match(decoded, /References: <msg123@mail>\r\n/);
+});
+
+test('truncateBody: short body passes through unchanged', () => {
+  assert.equal(truncateBody('short email'), 'short email');
+});
+
+test('truncateBody: long body is capped at 2000 chars by default', () => {
+  const long = 'a'.repeat(5000);
+  const result = truncateBody(long);
+  assert.equal(result.length, 2000 + '\n...[truncated]'.length);
+  assert.ok(result.endsWith('...[truncated]'));
+});
+
+test('truncateBody: respects a custom max length', () => {
+  const result = truncateBody('abcdefghij', 5);
+  assert.equal(result, 'abcde\n...[truncated]');
 });
