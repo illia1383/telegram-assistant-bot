@@ -26,6 +26,30 @@ export function asNumber(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// The agent is supposed to call get_today_status before log_accomplishments to
+// fetch real goal ids, but nothing enforces that — a model that skips the fetch
+// (or garbles a long UUID when copying it into the next tool call) silently logs
+// a completion that matches no real goal, leaving it stuck unchecked forever.
+// Accepting the goal's own text as a fallback removes the need to transcribe an
+// opaque id at all: matching happens server-side against real active goals.
+export function resolveGoalIds(identifiers, goals) {
+  const resolved = new Set();
+  for (const raw of identifiers) {
+    const id = String(raw).trim();
+    if (!id) continue;
+    const byId = goals.find(g => g.id === id);
+    if (byId) { resolved.add(byId.id); continue; }
+    const lower = id.toLowerCase();
+    const byText = goals.find(g => g.text.toLowerCase() === lower);
+    if (byText) { resolved.add(byText.id); continue; }
+    const bySubstring = goals.find(
+      g => g.text.toLowerCase().includes(lower) || lower.includes(g.text.toLowerCase())
+    );
+    if (bySubstring) resolved.add(bySubstring.id);
+  }
+  return [...resolved];
+}
+
 function todayString() {
   const tz = process.env.TIMEZONE || 'America/New_York';
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
@@ -64,9 +88,9 @@ const def = (name, description, properties = {}, required = []) => ({
 
 export const TOOLS = [
   def('get_today_status', 'Get active daily goals, pending one-off goals, and what has been completed today (with goal IDs). Call before logging accomplishments.'),
-  def('log_accomplishments', 'Log completed goals for today using goal IDs from get_today_status.', {
-    daily_goal_ids: { type: 'array', items: { type: 'string' } },
-    oneoff_goal_ids: { type: 'array', items: { type: 'string' } },
+  def('log_accomplishments', 'Log completed goals for today. Each entry can be either the goal id from get_today_status OR the goal\'s exact text — text is matched against the active goal list, so calling get_today_status first is helpful but not required.', {
+    daily_goal_ids: { type: 'array', items: { type: 'string' }, description: 'Goal ids or goal text for completed daily goals' },
+    oneoff_goal_ids: { type: 'array', items: { type: 'string' }, description: 'Goal ids or goal text for completed one-off goals' },
     notes: { type: 'string', description: 'One-sentence summary of what was accomplished' },
   }, ['daily_goal_ids', 'oneoff_goal_ids', 'notes']),
   def('add_goal', 'Add a goal. Daily goals recur every day; one-off goals are single tasks.', {
@@ -233,15 +257,20 @@ export const EXECUTORS = {
 
   async log_accomplishments({ daily_goal_ids = [], oneoff_goal_ids = [], notes = '' }) {
     const today = todayString();
-    const [dailyGoals, existingLog] = await Promise.all([getDailyGoals(true), getLogForDate(today)]);
+    const [dailyGoals, oneoffGoals, existingLog] = await Promise.all([
+      getDailyGoals(true), getOneoffGoals(true), getLogForDate(today),
+    ]);
+
+    const resolvedDaily = resolveGoalIds(daily_goal_ids, dailyGoals);
+    const resolvedOneoff = resolveGoalIds(oneoff_goal_ids, oneoffGoals);
 
     const mergedDaily = [...new Set([
       ...(existingLog?.completed_daily_goal_ids || '').split(',').filter(Boolean),
-      ...daily_goal_ids,
+      ...resolvedDaily,
     ])];
     const mergedOneoff = [...new Set([
       ...(existingLog?.completed_oneoff_ids || '').split(',').filter(Boolean),
-      ...oneoff_goal_ids,
+      ...resolvedOneoff,
     ])];
     const allDailyHit = dailyGoals.every(g => mergedDaily.includes(g.id));
 
@@ -251,8 +280,19 @@ export const EXECUTORS = {
       notes,
       all_daily_hit: allDailyHit,
     });
-    for (const id of oneoff_goal_ids) await markOneoffDone(id);
-    return { logged: true, all_daily_hit: allDailyHit, streak: await getStreaks() };
+    for (const id of resolvedOneoff) await markOneoffDone(id);
+
+    const unresolved = [
+      ...daily_goal_ids.filter(x => resolveGoalIds([x], dailyGoals).length === 0),
+      ...oneoff_goal_ids.filter(x => resolveGoalIds([x], oneoffGoals).length === 0),
+    ];
+
+    return {
+      logged: true,
+      all_daily_hit: allDailyHit,
+      streak: await getStreaks(),
+      ...(unresolved.length ? { warning: `Could not match to a real goal: ${unresolved.join(', ')}` } : {}),
+    };
   },
 
   async add_goal({ text, type }) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TOOLS, selectTools, asNumber } from '../src/agent-tools.js';
+import { TOOLS, selectTools, asNumber, resolveGoalIds } from '../src/agent-tools.js';
 
 const names = (tools) => tools.map(t => t.function.name);
 
@@ -63,4 +63,33 @@ test('numeric tool params accept both number and string types (Groq schema)', ()
   const byName = Object.fromEntries(TOOLS.map(t => [t.function.name, t.function.parameters.properties]));
   assert.deepEqual(byName.list_emails.max_results.type, ['number', 'string']);
   assert.deepEqual(byName.find_free_slots.duration_minutes.type, ['number', 'string']);
+});
+
+// Regression coverage for goal check-offs that silently never took: the agent
+// is supposed to call get_today_status before log_accomplishments to get real
+// ids, but nothing enforces that, and a garbled/guessed id used to merge into
+// the log without ever matching a real goal — leaving it stuck unchecked.
+const GOALS = [
+  { id: 'abc-123', text: '3 leetcodes' },
+  { id: 'def-456', text: 'apply' },
+];
+
+test('resolveGoalIds matches a real id directly', () => {
+  assert.deepEqual(resolveGoalIds(['abc-123'], GOALS), ['abc-123']);
+});
+
+test('resolveGoalIds falls back to exact goal text (case-insensitive)', () => {
+  assert.deepEqual(resolveGoalIds(['Apply'], GOALS), ['def-456']);
+});
+
+test('resolveGoalIds falls back to a substring match either direction', () => {
+  assert.deepEqual(resolveGoalIds(['leetcodes'], GOALS), ['abc-123']);
+});
+
+test('resolveGoalIds drops identifiers matching no real goal instead of passing them through', () => {
+  assert.deepEqual(resolveGoalIds(['made up nonsense'], GOALS), []);
+});
+
+test('resolveGoalIds dedupes when id and text both resolve to the same goal', () => {
+  assert.deepEqual(resolveGoalIds(['def-456', 'apply'], GOALS), ['def-456']);
 });

@@ -3,31 +3,37 @@ import { getAllLogs } from './sheets.js';
 // ─── Core streak logic ────────────────────────────────────────────────────────
 // Exported separately so it can be unit-tested without hitting the Sheets API.
 
-export function calculateStreaks(logs) {
+const ONE_DAY_MS = 86_400_000;
+
+// DailyLog rows are dated using the app's configured TIMEZONE (see todayString()
+// in sheets.js/commands.js/agent-tools.js), not UTC. Formatting "today" via
+// toISOString() here used to disagree with that near UTC midnight — e.g. around
+// 8pm America/New_York, UTC's calendar day has already flipped while the user's
+// hasn't, so streaks flickered depending on exactly when a request landed.
+function fmtInTz(date, timezone) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(date);
+}
+
+export function calculateStreaks(logs, timezone = process.env.TIMEZONE || 'America/New_York', now = new Date()) {
   const hitDates = new Set(
     logs.filter(l => l.all_daily_hit === 'TRUE').map(l => l.date)
   );
 
   if (hitDates.size === 0) return { current: 0, best: 0 };
 
-  const fmt = (d) => d.toISOString().split('T')[0];
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStr = fmt(today);
+  const todayStr = fmtInTz(now, timezone);
 
   // If today isn't logged as a hit yet, don't penalise — start counting from yesterday.
-  const startDate = new Date(today);
+  let cursorMs = now.getTime();
   if (!hitDates.has(todayStr)) {
-    startDate.setDate(startDate.getDate() - 1);
+    cursorMs -= ONE_DAY_MS;
   }
 
-  // Current streak: walk backward from startDate
+  // Current streak: walk backward from the start date
   let current = 0;
-  const cursor = new Date(startDate);
-  while (hitDates.has(fmt(cursor))) {
+  while (hitDates.has(fmtInTz(new Date(cursorMs), timezone))) {
     current++;
-    cursor.setDate(cursor.getDate() - 1);
+    cursorMs -= ONE_DAY_MS;
   }
 
   // Best streak: scan the sorted list for the longest consecutive run
