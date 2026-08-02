@@ -93,7 +93,7 @@ export const TOOLS = [
     oneoff_goal_ids: { type: 'array', items: { type: 'string' }, description: 'Goal ids or goal text for completed one-off goals' },
     notes: { type: 'string', description: 'One-sentence summary of what was accomplished' },
   }, ['daily_goal_ids', 'oneoff_goal_ids', 'notes']),
-  def('add_goal', 'Add a goal. Daily goals recur every day; one-off goals are single tasks.', {
+  def('add_goal', 'Add a NEW goal that does not already exist. Do not call this for something the user just did — check get_today_status first and use log_accomplishments if it matches an existing goal. Daily goals recur every day; one-off goals are single tasks.', {
     text: { type: 'string' },
     type: { type: 'string', enum: ['daily', 'oneoff'] },
   }, ['text', 'type']),
@@ -177,7 +177,7 @@ export const TOOLS = [
   def('list_automations', 'List active automations with IDs and schedules.'),
   def('delete_automation', 'Deactivate an automation by ID.', { automation_id: { type: 'string' } }, ['automation_id']),
 
-  def('add_job_application', 'Log a new job application (status Waiting).', { company: { type: 'string' } }, ['company']),
+  def('add_job_application', 'Log a NEW job application for a specific named company (status Waiting). Never call this for a generic "applied"/"applied to a job" message with no company name — that almost always refers to an existing goal (check get_today_status and use log_accomplishments instead). Only use this when the user actually names the company.', { company: { type: 'string' } }, ['company']),
   def('update_job_status', 'Update a job application status (Rejected, Interview, Offer, ...).', {
     company: { type: 'string' },
     status: { type: 'string' },
