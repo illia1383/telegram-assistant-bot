@@ -16,6 +16,8 @@ export async function llmRequest(payload) {
       authorization: `Bearer ${process.env.LLM_API_KEY || 'none'}`,
     },
     body: JSON.stringify({
+      temperature: 0,
+      seed: 42,
       ...payload,
       model: payload.model || process.env.LLM_MODEL || 'llama-3.3-70b-versatile',
     }),
@@ -25,13 +27,14 @@ export async function llmRequest(payload) {
   return res.json();
 }
 
-async function chat(system, user, maxTokens) {
+async function chat(system, user, maxTokens, extra = {}) {
   const data = await llmRequest({
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
+    ...extra,
   });
   return data.choices?.[0]?.message?.content ?? '';
 }
@@ -90,7 +93,9 @@ USER MESSAGE:
 ${message}`;
 
   console.log('[llm] Calling parseCheckinMessage...');
-  const raw = await chat(CHECKIN_SYSTEM_PROMPT, goalsContext, 512);
+  const raw = await chat(CHECKIN_SYSTEM_PROMPT, goalsContext, 512, {
+    response_format: { type: 'json_object' },
+  });
 
   const parsed = extractCheckinJson(raw);
   if (!parsed) console.error('[llm] Failed to parse check-in JSON response');
