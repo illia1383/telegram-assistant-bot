@@ -3,7 +3,7 @@ import { getOAuthClient } from './google-auth.js';
 
 // ─── Gmail email agent ─────────────────────────────────────────────────────────
 // Requires the OAuth refresh token to include the gmail.modify scope.
-// Re-run scripts/get-calendar-token.js (it now requests Calendar + Gmail).
+// Re-run `npm run setup` if your token predates this (it requests all scopes at once).
 
 function getGmail() {
   return google.gmail({ version: 'v1', auth: getOAuthClient() });

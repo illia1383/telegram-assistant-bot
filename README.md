@@ -46,83 +46,52 @@ The bot uses **long-polling** — it constantly asks Telegram "any new messages?
 
 ## Setup
 
-### 1. Create a Telegram bot (takes ~2 minutes)
+```bash
+npm install
+npm run setup
+```
 
-1. Open Telegram and search for **@BotFather**.
-2. Send `/newbot` and follow the prompts (pick any name and username).
-3. BotFather gives you a token like `7123456789:AAF_abc123...` → `TELEGRAM_BOT_TOKEN`
-4. Start a chat with your new bot (search for its username and hit Start).
+The wizard walks through everything interactively:
 
-### 2. Find your Telegram chat ID
+1. **Telegram bot** — prompts you to create one via @BotFather (~1 minute), then confirms it can message you by waiting for your first message.
+2. **Google (Calendar + Gmail + Sheets)** — opens your browser for a single sign-in. You'll see an "unverified app" warning first — click **Advanced → Go to (app) (unsafe)** to continue; this is expected for a self-hosted app and is documented further below. Approving it authorizes calendar, email, and creates a private spreadsheet under your own Google account — no manual spreadsheet building, no service account, no sharing steps.
+3. **LLM key** — prompts for a free [Groq](https://console.groq.com) API key.
+4. **News key** — prompts for a free [NewsAPI](https://newsapi.org/register) key.
+5. **Timezone** — auto-detected, confirm or override.
 
-1. Fill in `TELEGRAM_BOT_TOKEN` in `.env` and start the server (`npm run dev`).
-2. Send any message to your bot from Telegram.
-3. The server logs will print: `set TELEGRAM_CHAT_ID=XXXXXXX in your .env`
-4. Paste that number into `.env` as `TELEGRAM_CHAT_ID` and restart.
-
-### 3. Google Cloud Service Account
-
-1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new project.
-2. Enable the **Google Sheets API** (APIs & Services → Library → search "Sheets").
-3. Go to **APIs & Services → Credentials → Create Credentials → Service Account**.
-4. Give it any name, click Done.
-5. Click the service account → **Keys** tab → **Add Key → JSON**. Download the file.
-6. Set `GOOGLE_SERVICE_ACCOUNT_JSON=./service-account.json` (or paste raw JSON inline).
-7. Create a new Google Spreadsheet with four tabs, exact names:
-
-   **DailyGoals** — row 1: `id | text | created_date | active`
-
-   **OneoffGoals** — row 1: `id | text | done | created_date | done_date`
-
-   **DailyLog** — row 1: `date | completed_daily_goal_ids | completed_oneoff_ids | notes | all_daily_hit`
-
-   **NewsLog** — row 1: `date | summary_sent`
-
-   > The server writes header rows automatically on first boot if the tabs are empty — you just need the four tabs with the right names.
-
-8. Copy the spreadsheet ID from its URL → `GOOGLE_SHEET_ID`
-9. Share the spreadsheet with the service account email (e.g. `bot@your-project.iam.gserviceaccount.com`) with **Editor** access.
-
-### 4. LLM API Key (open-source models)
-
-The bot talks to any OpenAI-compatible endpoint. Easiest free option: sign up at [console.groq.com](https://console.groq.com), create a key → `LLM_API_KEY` (defaults use Groq + Llama 3.3 70B). Groq periodically retires preview models, so if you hit a `model_not_found` error, check [console.groq.com/docs/models](https://console.groq.com/docs/models) for what's current and update `LLM_MODEL`. To run fully local instead, install [Ollama](https://ollama.com) and set `LLM_BASE_URL=http://localhost:11434/v1` and `LLM_MODEL=llama3.2` — no key needed.
-
-### 5. News API Key
-
-Choose one:
-- **NewsAPI** (recommended): sign up at [newsapi.org](https://newsapi.org/register), free tier = 100 req/day → set `NEWS_API_PROVIDER=newsapi`
-- **GNews**: sign up at [gnews.io](https://gnews.io), free tier = 100 req/day → set `NEWS_API_PROVIDER=gnews`
-
-Copy your key → `NEWS_API_KEY`
-
----
-
-## Running locally
+It writes the result to `.env`. Then:
 
 ```bash
-# Install dependencies
-npm install
-
-# Copy and fill in env vars
-cp .env.example .env
-# Edit .env with real values
-
-# Start (auto-restarts on file changes)
 npm run dev
 ```
 
 No ngrok needed. The bot polls Telegram directly.
 
+### About the "unverified app" warning
+
+This app ships with one shared Google OAuth client so nobody has to create their own Google Cloud project. Since that shared client hasn't been through Google's app verification process, every self-hoster sees an "unverified app" warning during sign-in — click through it (Advanced → Go to app (unsafe)). This is safe: it's the same client used by every copy of this app, your data goes directly from your Google account to your own bot instance, and you can revoke access anytime at [myaccount.google.com/permissions](https://myaccount.google.com/permissions). One caveat: while unverified, Google caps this at 100 users total across every person running this setup — if you hit that wall, see "Advanced" below.
+
+### Advanced: bring your own Google Cloud project
+
+If you'd rather not depend on the shared OAuth client (e.g. you're past the 100-user cap, or just prefer full control):
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com), create a project, and enable the **Google Calendar**, **Gmail**, and **Google Sheets** APIs.
+2. **APIs & Services → Credentials → Create Credentials → OAuth client ID** → Application type: **Desktop app**.
+3. Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in your shell environment (or `.env`, before running setup).
+4. Run `npm run setup` as usual — it'll use your credentials instead of the shared default.
+
 ---
 
 ## Deploying to Railway
 
-1. Push this repo to GitHub.
-2. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
-3. Select the repo. Railway auto-detects Node.js and uses `npm start`.
-4. In the **Variables** tab, add every key from `.env.example` with real values.
-   - For `GOOGLE_SERVICE_ACCOUNT_JSON`: paste the entire JSON file contents as one value (Railway's UI handles multi-line).
-5. Deploy — that's it. The bot stays online via Railway's persistent process.
+Railway can't run the interactive browser-based `npm run setup` (it's a headless environment), so run setup locally first, then copy the result over:
+
+1. `npm run setup` locally to produce a working `.env`.
+2. Push this repo to GitHub.
+3. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
+4. Select the repo. Railway auto-detects Node.js and uses `npm start`.
+5. In the **Variables** tab, copy every key from your local `.env` in.
+6. Deploy — that's it. The bot stays online via Railway's persistent process.
 
 ---
 
@@ -161,7 +130,7 @@ No ngrok needed. The bot polls Telegram directly.
 | Automation | Send `every day at 9am send me my calendar` — confirm, then check the Automations tab |
 | Memory | Send `remember that I prefer morning meetings`, then `what do you remember about me?` |
 
-> **Gmail scope**: if your `GOOGLE_CALENDAR_REFRESH_TOKEN` predates the email features, re-run `node scripts/get-calendar-token.js` — it now requests Calendar + Gmail scopes — and update the token in `.env`.
+> **Scopes**: if your `GOOGLE_CALENDAR_REFRESH_TOKEN` predates the email or spreadsheet-auth features, re-run `npm run setup` — it requests Calendar + Gmail + Sheets in one consent — and it'll update `.env` for you.
 
 > **Sheet tabs**: the new `Memory`, `Reminders`, and `Automations` tabs are created automatically on first boot.
 
@@ -175,8 +144,9 @@ See `.env.example` for the full list with inline comments.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | Token from @BotFather |
 | `TELEGRAM_CHAT_ID` | Yes | Your personal numeric Telegram chat ID |
-| `GOOGLE_SHEET_ID` | Yes | ID from the Google Spreadsheet URL |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Yes | File path or inline JSON of service account key |
+| `GOOGLE_SHEET_ID` | Yes | ID of your auto-created data spreadsheet |
+| `GOOGLE_CALENDAR_REFRESH_TOKEN` | Yes | OAuth refresh token (Calendar + Gmail + Sheets) |
+| `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | No | Only needed if using your own Google Cloud project — see "Advanced" above |
 | `LLM_API_KEY` | Yes* | API key for the LLM endpoint (*not needed for local Ollama) |
 | `LLM_BASE_URL` | No | OpenAI-compatible base URL (default: Groq) |
 | `LLM_MODEL` | No | Model name (default: llama-3.3-70b-versatile) |

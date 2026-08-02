@@ -1,10 +1,12 @@
 import { google } from 'googleapis';
-import { readFileSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { getOAuthClient } from './google-auth.js';
 
-const SHEET_ID = process.env.GOOGLE_SHEET_ID;
+function sheetId() {
+  return process.env.GOOGLE_SHEET_ID;
+}
 
-const TABS = {
+export const TABS = {
   DAILY_GOALS: 'DailyGoals',
   ONEOFF_GOALS: 'OneoffGoals',
   DAILY_LOG: 'DailyLog',
@@ -12,6 +14,7 @@ const TABS = {
   MEMORY: 'Memory',
   REMINDERS: 'Reminders',
   AUTOMATIONS: 'Automations',
+  JOB_APPLICATIONS: 'JobApplications',
 };
 
 const HEADERS = {
@@ -22,29 +25,14 @@ const HEADERS = {
   [TABS.MEMORY]: ['id', 'fact', 'category', 'created_date'],
   [TABS.REMINDERS]: ['id', 'text', 'due_iso', 'status', 'created_date'],
   [TABS.AUTOMATIONS]: ['id', 'description', 'cron', 'prompt', 'active', 'created_date'],
+  [TABS.JOB_APPLICATIONS]: ['company', 'dateApplied', 'status'],
 };
 
 let sheetsClient = null;
 
 function getClient() {
   if (sheetsClient) return sheetsClient;
-
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not set');
-
-  let credentials;
-  if (raw.trim().startsWith('{')) {
-    credentials = JSON.parse(raw);
-  } else {
-    credentials = JSON.parse(readFileSync(raw, 'utf8'));
-  }
-
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-
-  sheetsClient = google.sheets({ version: 'v4', auth });
+  sheetsClient = google.sheets({ version: 'v4', auth: getOAuthClient() });
   return sheetsClient;
 }
 
@@ -53,7 +41,7 @@ function getClient() {
 export async function getSheetData(tabName) {
   const client = getClient();
   const res = await client.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
+    spreadsheetId: sheetId(),
     range: `${tabName}!A:Z`,
   });
   return res.data.values || [];
@@ -62,7 +50,7 @@ export async function getSheetData(tabName) {
 export async function appendRow(tabName, row) {
   const client = getClient();
   await client.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID,
+    spreadsheetId: sheetId(),
     range: `${tabName}!A1`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [row] },
@@ -73,7 +61,7 @@ export async function updateRow(tabName, sheetRowNumber, row) {
   // sheetRowNumber is 1-based (row 1 = headers, row 2 = first data row)
   const client = getClient();
   await client.spreadsheets.values.update({
-    spreadsheetId: SHEET_ID,
+    spreadsheetId: sheetId(),
     range: `${tabName}!A${sheetRowNumber}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [row] },
@@ -82,13 +70,13 @@ export async function updateRow(tabName, sheetRowNumber, row) {
 
 export async function deleteRow(tabName, sheetRowNumber) {
   const client = getClient();
-  const meta = await client.spreadsheets.get({ spreadsheetId: SHEET_ID });
+  const meta = await client.spreadsheets.get({ spreadsheetId: sheetId() });
   const sheet = meta.data.sheets.find(s => s.properties.title === tabName);
   if (!sheet) throw new Error(`Tab "${tabName}" not found`);
   const sheetId = sheet.properties.sheetId;
 
   await client.spreadsheets.batchUpdate({
-    spreadsheetId: SHEET_ID,
+    spreadsheetId: sheetId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -119,17 +107,28 @@ function todayString() {
 
 // ─── Sheet initialization ─────────────────────────────────────────────────────
 
+// Creates a brand-new spreadsheet under the authorized user's own Google account
+// and returns its ID. Used by `npm run setup` so nobody has to hand-build the
+// sheet or share it with anything — it's just theirs from the start.
+export async function createSpreadsheet(title = 'Telegram Assistant Bot Data') {
+  const client = getClient();
+  const res = await client.spreadsheets.create({
+    requestBody: { properties: { title } },
+  });
+  return res.data.spreadsheetId;
+}
+
 export async function initializeSheets() {
   // Create any missing tabs first, so new features work without manual sheet setup
   try {
     const client = getClient();
-    const meta = await client.spreadsheets.get({ spreadsheetId: SHEET_ID });
+    const meta = await client.spreadsheets.get({ spreadsheetId: sheetId() });
     const existing = new Set(meta.data.sheets.map(s => s.properties.title));
     const missing = Object.keys(HEADERS).filter(tab => !existing.has(tab));
 
     if (missing.length > 0) {
       await client.spreadsheets.batchUpdate({
-        spreadsheetId: SHEET_ID,
+        spreadsheetId: sheetId(),
         requestBody: {
           requests: missing.map(title => ({ addSheet: { properties: { title } } })),
         },

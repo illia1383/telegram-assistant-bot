@@ -26,5 +26,6 @@ Personal Telegram assistant bot. Node.js (>=18), ES modules, Express server, lon
 
 ## Safety
 
-- Never read, print, or commit secrets: `.env`, `service-account.json`, `oauth-credentials.json`. If touching config, edit `.env.example` instead.
+- Never read, print, or commit secrets: `.env`, refresh tokens, per-user OAuth client secrets. If touching config, edit `.env.example` instead.
+- `src/google-auth.js`'s `DEFAULT_CLIENT_ID`/`DEFAULT_CLIENT_SECRET` are the exception: a shared *installed-app* OAuth client meant to ship in the repo (Google's own guidance treats this client type as non-confidential, since it can't act without a user's own consent + refresh token). Don't treat these like the other secrets above.
 - Don't change the Google Sheet tab names or column layouts without being asked — the sheet is live data.
